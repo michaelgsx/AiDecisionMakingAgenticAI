@@ -14,6 +14,7 @@ public class HumanInLoopService {
 
     public static final String STATUS_WAITING = "WAITING";
     public static final String STATUS_ANSWERED = "ANSWERED";
+    public static final String STATUS_EXPIRED = "EXPIRED";
 
     private final OrchestratorHumanRequestRepository repo;
 
@@ -68,5 +69,22 @@ public class HumanInLoopService {
     public OrchestratorHumanRequest getRequest(UUID requestId) {
         return repo.findByRequestId(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown human request: " + requestId));
+    }
+
+    @Transactional(readOnly = true)
+    public OrchestratorHumanRequest findByRunAndStepKey(UUID runId, String stepKey) {
+        return repo.findByRunIdAndStepKey(runId, stepKey).orElse(null);
+    }
+
+    @Transactional
+    public void cancel(UUID requestId, String reason) {
+        OrchestratorHumanRequest req = getRequest(requestId);
+        if (!STATUS_WAITING.equals(req.getStatus())) {
+            throw new IllegalArgumentException("Only WAITING human requests can be cancelled");
+        }
+        req.setStatus(STATUS_EXPIRED);
+        req.setComment(reason == null || reason.isBlank() ? "cancelled via API" : reason.trim());
+        req.setAnsweredAt(Instant.now());
+        repo.save(req);
     }
 }

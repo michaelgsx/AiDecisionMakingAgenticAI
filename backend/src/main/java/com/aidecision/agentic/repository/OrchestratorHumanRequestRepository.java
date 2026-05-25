@@ -13,4 +13,6 @@ public interface OrchestratorHumanRequestRepository extends JpaRepository<Orches
     Optional<OrchestratorHumanRequest> findByStepId(UUID stepId);
 
     Optional<OrchestratorHumanRequest> findByRequestId(UUID requestId);
+
+    Optional<OrchestratorHumanRequest> findByRunIdAndStepKey(UUID runId, String stepKey);
 }

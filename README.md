@@ -277,6 +277,50 @@ APP_RAG_API_BASE_URL=https://<your-backend-app>.azurewebsites.net
 APP_RAG_API_OPS_TOKEN=<optional>
 ```
 
+## Per-tool REST API
+
+Each built-in tool has its own `@RestController` under `/agent/tools/{tool_name}` with the same four endpoints:
+
+| Method | Path suffix | Description |
+|--------|-------------|-------------|
+| GET | `/registry-info` | Row from `orchestrator_tool` + parsed request/response schemas |
+| POST | `/execute` | Run the tool once (`ToolExecuteRequest`: `params`, `question`, optional `runId`, `stepKey`, `priorOutputsByStepKey`) |
+| POST | `/poll` | **ASYNC only** — pass `priorOutput` from a pending `/execute` (e.g. `human_in_the_loop`) |
+| POST | `/cancel` | **`human_in_the_loop` only** — cancel a WAITING request (`requestId` or `runId` + `stepKey`) |
+
+Controllers: `backend/src/main/java/com/aidecision/agentic/controller/tool/`
+
+| Tool | Base path |
+|------|-----------|
+| data_acquisition | `/agent/tools/data_acquisition` |
+| similarity_retrieval | `/agent/tools/similarity_retrieval` |
+| ai_decision_rag | `/agent/tools/ai_decision_rag` |
+| natural_language_to_sql | `/agent/tools/natural_language_to_sql` |
+| human_in_the_loop | `/agent/tools/human_in_the_loop` |
+| llm_answer | `/agent/tools/llm_answer` |
+
+Example — execute RAG:
+
+```http
+POST /agent/tools/ai_decision_rag/execute
+Content-Type: application/json
+
+{
+  "question": "Should we freeze this withdrawal?",
+  "params": {
+    "text": "Should we freeze this withdrawal?",
+    "metadata": "{\"user_id\":\"user-demo-001\"}"
+  }
+}
+```
+
+Example — poll human step (after async execute):
+
+```http
+POST /agent/tools/human_in_the_loop/poll
+{ "priorOutput": { "requestId": "...", "status": "WAITING" }, "runId": "...", "stepKey": "s3" }
+```
+
 ## API
 
 | Method | Path | Description |

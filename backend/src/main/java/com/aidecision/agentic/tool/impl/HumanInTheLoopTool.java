@@ -73,6 +73,9 @@ public class HumanInTheLoopTool implements AsyncAgentTool {
         if (HumanInLoopService.STATUS_WAITING.equals(current.getStatus())) {
             return ToolResult.pending(priorOutput);
         }
+        if (HumanInLoopService.STATUS_EXPIRED.equals(current.getStatus())) {
+            return ToolResult.fail("Human request was cancelled (EXPIRED)");
+        }
 
         boolean accepted = "accept".equals(current.getDecision());
         Map<String, Object> out = new HashMap<>(priorOutput);
