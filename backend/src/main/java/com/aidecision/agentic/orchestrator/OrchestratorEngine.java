@@ -1,0 +1,206 @@
+package com.aidecision.agentic.orchestrator;
+
+import com.aidecision.agentic.config.OrchestratorProperties;
+import com.aidecision.agentic.entity.OrchestratorRun;
+import com.aidecision.agentic.entity.OrchestratorStep;
+import com.aidecision.agentic.repository.OrchestratorRunRepository;
+import com.aidecision.agentic.repository.OrchestratorStepRepository;
+import com.aidecision.agentic.service.QaEvaluationService;
+import com.aidecision.agentic.tool.ToolRegistryService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Service
+public class OrchestratorEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(OrchestratorEngine.class);
+
+    private final OrchestratorRunRepository runRepo;
+    private final OrchestratorStepRepository stepRepo;
+    private final WorkflowPlannerService planner;
+    private final WorkflowExecutor executor;
+    private final ToolRegistryService toolRegistry;
+    private final QaEvaluationService evaluationService;
+    private final OrchestratorProperties props;
+    private final ObjectMapper mapper;
+
+    public OrchestratorEngine(
+            OrchestratorRunRepository runRepo,
+            OrchestratorStepRepository stepRepo,
+            WorkflowPlannerService planner,
+            WorkflowExecutor executor,
+            ToolRegistryService toolRegistry,
+            QaEvaluationService evaluationService,
+            OrchestratorProperties props,
+            ObjectMapper mapper) {
+        this.runRepo = runRepo;
+        this.stepRepo = stepRepo;
+        this.planner = planner;
+        this.executor = executor;
+        this.toolRegistry = toolRegistry;
+        this.evaluationService = evaluationService;
+        this.props = props;
+        this.mapper = mapper;
+    }
+
+    @Transactional
+    public OrchestratorRun submitQuestion(String question, UUID conversationId, String userId) {
+        OrchestratorRun run = new OrchestratorRun();
+        run.setQuestion(question.trim());
+        run.setConversationId(conversationId);
+        run.setUserId(blankToNull(userId));
+        run.setStatus(RunStatus.PENDING.name());
+        return runRepo.save(run);
+    }
+
+    @Transactional
+    public void processRun(UUID runId) {
+        OrchestratorRun run = runRepo.findById(runId).orElse(null);
+        if (run == null) {
+            return;
+        }
+
+        try {
+            switch (RunStatus.valueOf(run.getStatus())) {
+                case PENDING -> planAndStart(run);
+                case RUNNING -> advanceRun(run);
+                default -> { }
+            }
+        } catch (Exception e) {
+            log.error("Orchestrator failed run {}", runId, e);
+            failRun(run, e.getMessage());
+        }
+    }
+
+    private void planAndStart(OrchestratorRun run) throws Exception {
+        run.setStatus(RunStatus.PLANNING.name());
+        runRepo.save(run);
+
+        WorkflowDag dag = planner.plan(run.getQuestion());
+        run.setWorkflowJson(mapper.writeValueAsString(dag));
+        persistSteps(run, dag);
+
+        run.setStatus(RunStatus.RUNNING.name());
+        runRepo.save(run);
+
+        List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
+        executor.markReadySteps(steps);
+        advanceRun(run);
+    }
+
+    private void persistSteps(OrchestratorRun run, WorkflowDag dag) throws Exception {
+        stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId()).forEach(stepRepo::delete);
+
+        for (WorkflowDag.WorkflowStepDef def : dag.steps()) {
+            OrchestratorStep step = new OrchestratorStep();
+            step.setRunId(run.getRunId());
+            step.setStepKey(def.id());
+            step.setToolName(def.tool());
+            step.setStatus(StepStatus.PENDING.name());
+            step.setDependsOnJson(mapper.writeValueAsString(def.dependsOn() == null ? List.of() : def.dependsOn()));
+            step.setInputJson(mapper.writeValueAsString(def.params() == null ? Map.of() : def.params()));
+            int maxTime = def.maxTimeMs() != null ? def.maxTimeMs() : (int) props.getDefaultStepMaxTimeMs();
+            int timeout = def.timeoutMs() != null ? def.timeoutMs() : (int) props.getDefaultStepTimeoutMs();
+            step.setMaxTimeMs(maxTime);
+            step.setTimeoutMs(timeout);
+            stepRepo.save(step);
+        }
+    }
+
+    private void advanceRun(OrchestratorRun run) throws Exception {
+        List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
+        executor.markReadySteps(steps);
+        steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
+        executor.executeReadySteps(run, steps);
+        steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
+
+        boolean anyFailed = steps.stream().anyMatch(s ->
+                StepStatus.FAILED.name().equals(s.getStatus()) || StepStatus.TIMED_OUT.name().equals(s.getStatus()));
+        if (anyFailed) {
+            failRun(run, "One or more workflow steps failed");
+            return;
+        }
+
+        boolean allDone = steps.stream().allMatch(s -> StepStatus.COMPLETED.name().equals(s.getStatus()));
+        if (allDone) {
+            completeRun(run, steps);
+            return;
+        }
+
+        executor.markReadySteps(steps);
+        runRepo.save(run);
+    }
+
+    private void completeRun(OrchestratorRun run, List<OrchestratorStep> steps) throws Exception {
+        String answer = extractFinalAnswer(steps);
+        run.setAnswerText(answer);
+        run.setStatus(RunStatus.COMPLETED.name());
+        run.setErrorMessage(null);
+        run.setCheckpointJson(mapper.writeValueAsString(Map.of("phase", "completed")));
+        runRepo.save(run);
+        evaluationService.enqueueCompletedRun(run);
+    }
+
+    private String extractFinalAnswer(List<OrchestratorStep> steps) {
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            OrchestratorStep s = steps.get(i);
+            if ("llm_answer".equals(s.getToolName()) && s.getOutputJson() != null) {
+                try {
+                    Map<?, ?> out = mapper.readValue(s.getOutputJson(), Map.class);
+                    Object a = out.get("answer");
+                    if (a != null) {
+                        return a.toString();
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return steps.stream()
+                .filter(s -> s.getOutputJson() != null)
+                .map(OrchestratorStep::getOutputJson)
+                .collect(Collectors.joining("\n\n"));
+    }
+
+    @Transactional
+    public void resumeRun(OrchestratorRun run) throws Exception {
+        if (run.getWorkflowJson() == null || run.getWorkflowJson().isBlank()) {
+            planAndStart(run);
+            return;
+        }
+        run.setStatus(RunStatus.RUNNING.name());
+        run.setErrorMessage(null);
+        runRepo.save(run);
+
+        List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
+        for (OrchestratorStep step : steps) {
+            if (StepStatus.FAILED.name().equals(step.getStatus()) || StepStatus.TIMED_OUT.name().equals(step.getStatus())) {
+                step.setStatus(StepStatus.PENDING.name());
+                step.setErrorMessage(null);
+                step.setStartedAt(null);
+                step.setFinishedAt(null);
+                step.setOutputJson(null);
+                stepRepo.save(step);
+            }
+        }
+        advanceRun(run);
+    }
+
+    private void failRun(OrchestratorRun run, String message) {
+        run.setStatus(RunStatus.FAILED.name());
+        run.setErrorMessage(message);
+        runRepo.save(run);
+    }
+
+    private static String blankToNull(String s) {
+        if (s == null || s.isBlank()) return null;
+        return s.trim();
+    }
+}

@@ -1,0 +1,55 @@
+# Deploy Agentic API JAR to Azure App Service: ai-rag-agentic-ai
+# Azure OpenAI chat deployment name: ai-rag-agentic-ai (resource ai-reg-embedding)
+#
+# App Service → Configuration (or Key Vault references):
+#   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY
+#   AZURE_OPENAI_CHAT_DEPLOYMENT=ai-rag-agentic-ai
+#   CORS_ORIGINS=https://<ai-rag-agentic-qa-swa>.azurestaticapps.net
+#   OPS_TOKEN, AZURE_SQL_*
+
+name: Deploy Agentic API (ai-rag-agentic-ai)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "db/**"
+      - ".github/workflows/deploy-agentic-appservice.yml"
+
+env:
+  AZURE_WEBAPP_NAME: ai-rag-agentic-ai
+  AZURE_OPENAI_CHAT_DEPLOYMENT: ai-rag-agentic-ai
+  JAVA_VERSION: "17"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Build JAR
+        working-directory: backend
+        run: ./mvnw clean package -DskipTests -B
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME || env.AZURE_WEBAPP_NAME }}
+          package: backend/target/*.jar
+
+      - name: Azure logout
+        if: always()
+        run: az logout || true
