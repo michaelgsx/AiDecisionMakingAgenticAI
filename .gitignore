@@ -1,5 +1,7 @@
 backend/target/
 backend/.env
+db/.env
+db/__pycache__/
 .idea/
 *.iml
 .DS_Store
