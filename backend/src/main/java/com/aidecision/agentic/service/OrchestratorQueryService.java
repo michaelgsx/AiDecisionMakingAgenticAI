@@ -21,16 +21,19 @@ public class OrchestratorQueryService {
     private final OrchestratorStepRepository stepRepo;
     private final OrchestratorEngine engine;
     private final HumanInLoopService humanInLoop;
+    private final WorkflowDiagramService workflowDiagrams;
 
     public OrchestratorQueryService(
             OrchestratorRunRepository runRepo,
             OrchestratorStepRepository stepRepo,
             OrchestratorEngine engine,
-            HumanInLoopService humanInLoop) {
+            HumanInLoopService humanInLoop,
+            WorkflowDiagramService workflowDiagrams) {
         this.runRepo = runRepo;
         this.stepRepo = stepRepo;
         this.engine = engine;
         this.humanInLoop = humanInLoop;
+        this.workflowDiagrams = workflowDiagrams;
     }
 
     @Transactional(readOnly = true)
@@ -58,13 +61,30 @@ public class OrchestratorQueryService {
                         r.getProposal()))
                 .toList();
 
+        String workflowJson = run.getWorkflowJson();
+        String mermaid = null;
+        if (workflowJson != null && !workflowJson.isBlank()) {
+            RunStatusResponse forDiagram = new RunStatusResponse(
+                    run.getRunId().toString(),
+                    run.getStatus(),
+                    run.getQuestion(),
+                    run.getAnswerText(),
+                    run.getErrorMessage(),
+                    workflowJson,
+                    null,
+                    stepDtos,
+                    !approvals.isEmpty(),
+                    approvals);
+            mermaid = workflowDiagrams.mermaidForRunStatus(forDiagram);
+        }
         return new RunStatusResponse(
                 run.getRunId().toString(),
                 run.getStatus(),
                 run.getQuestion(),
                 run.getAnswerText(),
                 run.getErrorMessage(),
-                run.getWorkflowJson(),
+                workflowJson,
+                mermaid,
                 stepDtos,
                 !approvals.isEmpty(),
                 approvals);

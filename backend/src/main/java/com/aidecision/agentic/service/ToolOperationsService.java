@@ -35,11 +35,8 @@ public class ToolOperationsService {
         this.mapper = mapper;
     }
 
-    public ToolRegistryInfoResponse registryInfo(String toolName) {
-        OrchestratorTool row = toolRegistry.enabledToolsByName().get(toolName);
-        if (row == null) {
-            throw new IllegalArgumentException("Unknown or disabled tool: " + toolName);
-        }
+    public ToolRegistryInfoResponse registryInfo(String toolName, String version) {
+        OrchestratorTool row = toolRegistry.requireRegistered(toolName, version);
         AgentTool executor = toolRegistry.requireExecutor(toolName);
         boolean async = executor instanceof AsyncAgentTool;
         return new ToolRegistryInfoResponse(
@@ -55,13 +52,15 @@ public class ToolOperationsService {
                 "human_in_the_loop".equals(toolName));
     }
 
-    public ToolRunResponse execute(String toolName, ToolExecuteRequest request) {
+    public ToolRunResponse execute(String toolName, String version, ToolExecuteRequest request) {
+        toolRegistry.requireRegistered(toolName, version);
         AgentTool tool = toolRegistry.requireExecutor(toolName);
         ToolResult result = tool.execute(buildContext(toolName, request), safeParams(request));
         return toRunResponse(toolName, result);
     }
 
-    public ToolRunResponse poll(String toolName, ToolPollRequest request) {
+    public ToolRunResponse poll(String toolName, String version, ToolPollRequest request) {
+        toolRegistry.requireRegistered(toolName, version);
         AgentTool tool = toolRegistry.requireExecutor(toolName);
         if (!(tool instanceof AsyncAgentTool async)) {
             throw new IllegalArgumentException("Tool does not support poll (not ASYNC): " + toolName);
@@ -75,7 +74,8 @@ public class ToolOperationsService {
         return toRunResponse(toolName, result);
     }
 
-    public ToolCancelResponse cancel(String toolName, ToolCancelRequest request) {
+    public ToolCancelResponse cancel(String toolName, String version, ToolCancelRequest request) {
+        toolRegistry.requireRegistered(toolName, version);
         if ("human_in_the_loop".equals(toolName)) {
             UUID requestId = request.requestId();
             if (requestId == null && request.runId() != null && request.stepKey() != null) {

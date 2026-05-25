@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/agent/tools/ai_decision_rag")
+@RequestMapping("/agent/tools/ai_decision_rag/{version}")
 public class AiDecisionRagToolController extends AbstractToolController {
 
     public AiDecisionRagToolController(ToolOperationsService operations) {

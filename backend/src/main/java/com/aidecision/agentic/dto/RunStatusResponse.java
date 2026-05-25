@@ -9,6 +9,7 @@ public record RunStatusResponse(
         String answer,
         String error,
         String workflowJson,
+        String workflowMermaid,
         List<StepStatusDto> steps,
         boolean waitingForHuman,
         List<HumanApprovalDto> pendingApprovals

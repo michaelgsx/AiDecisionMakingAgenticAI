@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AgenticAI — Workflow diagram</title>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+    window.renderMermaid = async (code) => {
+      const el = document.getElementById('diagram');
+      el.removeAttribute('data-processed');
+      el.textContent = code;
+      await mermaid.run({ nodes: [el] });
+    };
+  </script>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #212529; background: #f8f9fa; }
+    body { margin: 0; padding: 1.25rem; max-width: 1100px; }
+    h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+    label { display: block; font-size: 0.85rem; font-weight: 600; margin: 0.75rem 0 0.35rem; }
+    textarea, input { width: 100%; box-sizing: border-box; font: 0.85rem/1.4 ui-monospace, monospace; }
+    textarea { min-height: 180px; }
+    .row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: end; }
+    .row > * { flex: 1; min-width: 200px; }
+    button {
+      margin-top: 0.75rem; padding: 0.5rem 1rem; cursor: pointer;
+      background: #0d6efd; color: #fff; border: none; border-radius: 6px; font-weight: 600;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    #diagram {
+      margin-top: 1.25rem; padding: 1rem; background: #fff;
+      border: 1px solid #dee2e6; border-radius: 8px; overflow: auto;
+    }
+    .err { color: #842029; background: #f8d7da; padding: 0.5rem 0.75rem; border-radius: 6px; margin-top: 0.75rem; }
+    .hint { font-size: 0.8rem; color: #6c757d; margin-top: 0.25rem; }
+  </style>
+</head>
+<body>
+  <h1>Workflow DAG viewer</h1>
+  <p class="hint">Paste <code>workflow_json</code> or load by <code>runId</code>. Renders via <code>POST /agent/workflow/diagram</code> or <code>GET /agent/runs/{runId}/workflow-diagram</code>.</p>
+
+  <div class="row">
+    <div>
+      <label for="runId">Run ID (optional)</label>
+      <input id="runId" type="text" placeholder="uuid from POST /agent/ask" />
+    </div>
+    <div>
+      <label for="token">Bearer token (optional)</label>
+      <input id="token" type="password" placeholder="OPS_TOKEN if configured" />
+    </div>
+  </div>
+
+  <label for="json">Workflow JSON</label>
+  <textarea id="json" placeholder='{"steps":[{"id":"s1","tool":"data_acquisition","dependsOn":[],...}]}'></textarea>
+
+  <button id="renderBtn" type="button">Render diagram</button>
+  <div id="error" class="err" hidden></div>
+  <pre id="diagram" class="mermaid"></pre>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const headers = () => {
+      const h = { 'Content-Type': 'application/json' };
+      const t = $('token').value.trim();
+      if (t) h['Authorization'] = 'Bearer ' + t;
+      return h;
+    };
+    const showError = (msg) => {
+      const el = $('error');
+      if (!msg) { el.hidden = true; el.textContent = ''; return; }
+      el.hidden = false;
+      el.textContent = msg;
+    };
+
+    $('renderBtn').addEventListener('click', async () => {
+      showError('');
+      $('renderBtn').disabled = true;
+      try {
+        const runId = $('runId').value.trim();
+        let data;
+        if (runId) {
+          const res = await fetch('/agent/runs/' + encodeURIComponent(runId) + '/workflow-diagram', { headers: headers() });
+          if (!res.ok) throw new Error(await res.text() || res.statusText);
+          data = await res.json();
+        } else {
+          const workflowJson = $('json').value.trim();
+          if (!workflowJson) throw new Error('Paste workflow JSON or enter a run ID.');
+          const res = await fetch('/agent/workflow/diagram', {
+            method: 'POST',
+            headers: headers(),
+            body: JSON.stringify({ workflowJson, stepStatuses: null }),
+          });
+          if (!res.ok) throw new Error(await res.text() || res.statusText);
+          data = await res.json();
+        }
+        await window.renderMermaid(data.mermaid);
+      } catch (e) {
+        showError(e.message || String(e));
+      } finally {
+        $('renderBtn').disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

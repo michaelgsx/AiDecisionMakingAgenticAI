@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/agent/tools/data_acquisition")
+@RequestMapping("/agent/tools/data_acquisition/{version}")
 public class DataAcquisitionToolController extends AbstractToolController {
 
     public DataAcquisitionToolController(ToolOperationsService operations) {

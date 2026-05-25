@@ -8,6 +8,7 @@ import com.aidecision.agentic.dto.ToolRegistryInfoResponse;
 import com.aidecision.agentic.dto.ToolRunResponse;
 import com.aidecision.agentic.service.ToolOperationsService;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
@@ -26,24 +27,26 @@ public abstract class AbstractToolController {
     protected abstract String toolName();
 
     @GetMapping("/registry-info")
-    public ToolRegistryInfoResponse registryInfo() {
-        return operations.registryInfo(toolName());
+    public ToolRegistryInfoResponse registryInfo(@PathVariable String version) {
+        return operations.registryInfo(toolName(), version);
     }
 
     @PostMapping("/execute")
-    public ToolRunResponse execute(@RequestBody(required = false) ToolExecuteRequest request) {
-        return operations.execute(toolName(), request != null ? request : emptyExecute());
+    public ToolRunResponse execute(
+            @PathVariable String version, @RequestBody(required = false) ToolExecuteRequest request) {
+        return operations.execute(toolName(), version, request != null ? request : emptyExecute());
     }
 
     @PostMapping("/poll")
-    public ToolRunResponse poll(@RequestBody ToolPollRequest request) {
-        return operations.poll(toolName(), request);
+    public ToolRunResponse poll(@PathVariable String version, @RequestBody ToolPollRequest request) {
+        return operations.poll(toolName(), version, request);
     }
 
     @PostMapping("/cancel")
-    public ToolCancelResponse cancel(@RequestBody(required = false) ToolCancelRequest request) {
+    public ToolCancelResponse cancel(
+            @PathVariable String version, @RequestBody(required = false) ToolCancelRequest request) {
         return operations.cancel(
-                toolName(), request != null ? request : new ToolCancelRequest(null, null, null, null));
+                toolName(), version, request != null ? request : new ToolCancelRequest(null, null, null, null));
     }
 
     private static ToolExecuteRequest emptyExecute() {

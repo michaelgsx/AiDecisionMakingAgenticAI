@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/agent/tools/similarity_retrieval")
+@RequestMapping("/agent/tools/similarity_retrieval/{version}")
 public class SimilarityRetrievalToolController extends AbstractToolController {
 
     public SimilarityRetrievalToolController(ToolOperationsService operations) {

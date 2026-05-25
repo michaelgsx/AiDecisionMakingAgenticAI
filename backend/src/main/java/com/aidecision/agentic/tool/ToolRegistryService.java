@@ -104,6 +104,21 @@ public class ToolRegistryService {
                 .collect(Collectors.toMap(OrchestratorTool::getToolName, Function.identity()));
     }
 
+    public OrchestratorTool requireRegistered(String toolName, String version) {
+        OrchestratorTool row = enabledToolsByName().get(toolName);
+        if (row == null) {
+            throw new IllegalArgumentException("Unknown or disabled tool: " + toolName);
+        }
+        if (version == null || version.isBlank()) {
+            throw new IllegalArgumentException("Tool version is required");
+        }
+        if (!row.getVersion().equals(version.trim())) {
+            throw new IllegalArgumentException(
+                    "Tool version mismatch for " + toolName + ": expected " + row.getVersion() + ", got " + version);
+        }
+        return row;
+    }
+
     public AgentTool requireExecutor(String toolName) {
         AgentTool tool = executorsByName.get(toolName);
         if (tool == null) {

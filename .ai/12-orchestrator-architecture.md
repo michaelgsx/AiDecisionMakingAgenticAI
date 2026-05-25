@@ -17,7 +17,9 @@
 | Method | Path |
 |--------|------|
 | POST | `/agent/ask` |
-| GET | `/agent/runs/{runId}` |
+| GET | `/agent/runs/{runId}` | Includes `workflowJson`, `workflowMermaid` |
+| GET | `/agent/runs/{runId}/workflow-diagram` | Mermaid DAG for the run |
+| POST | `/agent/workflow/diagram` | Mermaid from arbitrary workflow JSON |
 | POST | `/agent/runs/{runId}/resume` |
 | POST | `/agent/runs/{runId}/human-response` | Accept/reject `human_in_the_loop` proposal |
 | GET | `/agent/tools` |
@@ -26,6 +28,17 @@
 | GET | `/agent/evaluations?status=pending` | Human review queue (Q&A list) |
 | POST | `/agent/evaluations/{evaluationId}/review` | Accept / reject for further review |
 | POST | `/agent/chat` | Legacy sync wait |
+
+Per-tool invoke (version must match `orchestrator_tool.version`, e.g. `1.1.0`):
+
+| Method | Path pattern |
+|--------|----------------|
+| GET | `/agent/tools/{toolName}/{version}/registry-info` |
+| POST | `/agent/tools/{toolName}/{version}/execute` |
+| POST | `/agent/tools/{toolName}/{version}/poll` |
+| POST | `/agent/tools/{toolName}/{version}/cancel` |
+
+Local DAG viewer: `GET /workflow.html` (static).
 
 ## Database
 

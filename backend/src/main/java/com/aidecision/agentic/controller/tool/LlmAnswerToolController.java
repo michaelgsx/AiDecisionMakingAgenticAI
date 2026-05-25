@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/agent/tools/llm_answer")
+@RequestMapping("/agent/tools/llm_answer/{version}")
 public class LlmAnswerToolController extends AbstractToolController {
 
     public LlmAnswerToolController(ToolOperationsService operations) {

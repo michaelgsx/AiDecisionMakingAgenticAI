@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/agent/tools/natural_language_to_sql")
+@RequestMapping("/agent/tools/natural_language_to_sql/{version}")
 public class NaturalLanguageToSqlToolController extends AbstractToolController {
 
     public NaturalLanguageToSqlToolController(ToolOperationsService operations) {

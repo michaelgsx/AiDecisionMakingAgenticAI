@@ -188,7 +188,7 @@ toolRegistry (from orchestrator_tool — use only these tools):
 | `natural_language_to_sql` | `question`, `maxRows` | `rowCount` — 0 vs non-empty |
 | `llm_answer` | (empty object) | `answer` — final text |
 
-Canonical definitions: `backend/src/main/java/com/aidecision/agentic/tool/ToolJsonSchemas.java`. Inspect live registry: `GET /agent/tools/ai_decision_rag/registry-info`.
+Canonical definitions: `backend/src/main/java/com/aidecision/agentic/tool/ToolJsonSchemas.java`. Inspect live registry: `GET /agent/tools/ai_decision_rag/1.1.0/registry-info`.
 
 ### Example Azure OpenAI request body
 
@@ -272,6 +272,27 @@ After planning, the same structure is saved (serialized `WorkflowDag`):
 
 Each step becomes a row in `orchestrator_step` (`step_key` = `id`, `tool_name` = `tool`, `depends_on_json`, `input_json` = `params`).
 
+### Workflow diagram (Mermaid)
+
+The API can turn the same JSON into a **Mermaid flowchart** (nodes = steps, edges = `dependsOn`). Step execution status from a run is applied as node colors when available.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/agent/workflow/diagram` | Body: `{ "workflowJson": "<string>", "stepStatuses": { "s1": "COMPLETED", ... } }` (statuses optional) → `{ "format": "mermaid", "mermaid": "..." }` |
+| GET | `/agent/runs/{runId}/workflow-diagram` | Diagram for the run’s stored `workflow_json` + live `orchestrator_step` statuses |
+
+`GET /agent/runs/{runId}` also includes **`workflowMermaid`** when `workflow_json` is present.
+
+**Browser viewer (local):** open `http://localhost:8788/workflow.html` — paste JSON or enter a `runId`, then render.
+
+Example `POST /agent/workflow/diagram`:
+
+```json
+{
+  "workflowJson": "{\"steps\":[{\"id\":\"s1\",\"tool\":\"data_acquisition\",\"dependsOn\":[],\"params\":{}},{\"id\":\"s2\",\"tool\":\"llm_answer\",\"dependsOn\":[\"s1\"],\"params\":{}}]}"
+}
+```
+
 ### Analytics-style question (NL2SQL in the DAG)
 
 **Question:** `How many ingest cases were rejected for login_anomaly last month?`
@@ -344,7 +365,7 @@ APP_RAG_API_OPS_TOKEN=<optional>
 
 ## Per-tool REST API
 
-Each built-in tool has its own `@RestController` under `/agent/tools/{tool_name}` with the same four endpoints:
+Each built-in tool has its own `@RestController` under `/agent/tools/{tool_name}/{version}` with the same four endpoints. The `version` path segment must match the row in `orchestrator_tool` (currently **1.1.0** for all built-ins).
 
 | Method | Path suffix | Description |
 |--------|-------------|-------------|
@@ -355,19 +376,19 @@ Each built-in tool has its own `@RestController` under `/agent/tools/{tool_name}
 
 Controllers: `backend/src/main/java/com/aidecision/agentic/controller/tool/`
 
-| Tool | Base path |
+| Tool | Base path (example version `1.1.0`) |
 |------|-----------|
-| data_acquisition | `/agent/tools/data_acquisition` |
-| similarity_retrieval | `/agent/tools/similarity_retrieval` |
-| ai_decision_rag | `/agent/tools/ai_decision_rag` |
-| natural_language_to_sql | `/agent/tools/natural_language_to_sql` |
-| human_in_the_loop | `/agent/tools/human_in_the_loop` |
-| llm_answer | `/agent/tools/llm_answer` |
+| data_acquisition | `/agent/tools/data_acquisition/1.1.0` |
+| similarity_retrieval | `/agent/tools/similarity_retrieval/1.1.0` |
+| ai_decision_rag | `/agent/tools/ai_decision_rag/1.1.0` |
+| natural_language_to_sql | `/agent/tools/natural_language_to_sql/1.1.0` |
+| human_in_the_loop | `/agent/tools/human_in_the_loop/1.1.0` |
+| llm_answer | `/agent/tools/llm_answer/1.1.0` |
 
 Example — execute RAG:
 
 ```http
-POST /agent/tools/ai_decision_rag/execute
+POST /agent/tools/ai_decision_rag/1.1.0/execute
 Content-Type: application/json
 
 {
@@ -382,7 +403,7 @@ Content-Type: application/json
 Example — poll human step (after async execute):
 
 ```http
-POST /agent/tools/human_in_the_loop/poll
+POST /agent/tools/human_in_the_loop/1.1.0/poll
 { "priorOutput": { "requestId": "...", "status": "WAITING" }, "runId": "...", "stepKey": "s3" }
 ```
 
@@ -391,7 +412,9 @@ POST /agent/tools/human_in_the_loop/poll
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/agent/ask` | Submit question → `{ runId, status, pollPath }` |
-| GET | `/agent/runs/{runId}` | Poll status, steps, `pendingApprovals` |
+| GET | `/agent/runs/{runId}` | Poll status, steps, `workflowJson`, `workflowMermaid`, `pendingApprovals` |
+| GET | `/agent/runs/{runId}/workflow-diagram` | Mermaid flowchart for the run DAG |
+| POST | `/agent/workflow/diagram` | Mermaid from arbitrary workflow JSON |
 | POST | `/agent/runs/{runId}/resume` | Resume a **FAILED** run |
 | POST | `/agent/runs/{runId}/human-response` | Answer `human_in_the_loop` step |
 | GET | `/agent/evaluations?status=pending` | Human review queue (`pending` \| `accepted` \| `rejected` \| `all`) |

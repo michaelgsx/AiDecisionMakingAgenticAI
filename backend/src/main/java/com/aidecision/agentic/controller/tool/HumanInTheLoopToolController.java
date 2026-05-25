@@ -5,7 +5,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/agent/tools/human_in_the_loop")
+@RequestMapping("/agent/tools/human_in_the_loop/{version}")
 public class HumanInTheLoopToolController extends AbstractToolController {
 
     public HumanInTheLoopToolController(ToolOperationsService operations) {
