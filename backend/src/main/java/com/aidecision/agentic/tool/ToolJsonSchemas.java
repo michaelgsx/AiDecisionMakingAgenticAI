@@ -8,11 +8,24 @@ final class ToolJsonSchemas {
     static final String DATA_ACQUISITION_REQUEST = """
             {
               "type": "object",
-              "description": "Inputs for loading risk context before other tools.",
+              "description": "NL question + scenario; LLM generates read-only SQL from schema_catalog descriptions.",
               "properties": {
                 "scenario": {
                   "type": "string",
-                  "description": "Risk use-case id (e.g. withdrawal_review, login_anomaly, qa). Used to scope feature lookup."
+                  "description": "Risk use-case id (withdrawal_review, withdrawal_spike, login_anomaly, qa). Scopes catalog tables in the prompt."
+                },
+                "question": {
+                  "type": "string",
+                  "description": "Natural-language question driving SQL generation. Defaults to the workflow user question."
+                },
+                "maxRows": {
+                  "type": "integer",
+                  "description": "Max rows to return from the generated SELECT (1–100, default 50)."
+                },
+                "tableNames": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Optional override: only these schema_catalog tables in the LLM prompt."
                 }
               }
             }
@@ -21,16 +34,25 @@ final class ToolJsonSchemas {
     static final String DATA_ACQUISITION_RESPONSE = """
             {
               "type": "object",
-              "description": "Context bundle passed to downstream steps via priorOutputs.",
+              "description": "SQL-backed context for downstream tools (RAG metadata, llm_answer).",
               "properties": {
+                "scenario": { "type": "string", "description": "Scenario id used for table scoping." },
+                "tables": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "schema_catalog tables included in the LLM prompt."
+                },
+                "sql": { "type": "string", "description": "Generated read-only SELECT executed against Azure SQL." },
+                "rows": {
+                  "type": "array",
+                  "description": "Result rows (objects keyed by column name)."
+                },
+                "rowCount": { "type": "integer", "description": "Number of rows returned." },
                 "features": {
                   "type": "object",
-                  "description": "Structured risk features (scenario, source, etc.). Empty object if none."
+                  "description": "Summary bundle: scenario, tables, rowCount, sample first row for RAG metadata."
                 },
-                "note": {
-                  "type": "string",
-                  "description": "Human-readable note about what was loaded."
-                }
+                "note": { "type": "string", "description": "Human-readable acquisition summary." }
               }
             }
             """;

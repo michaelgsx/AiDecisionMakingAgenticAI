@@ -67,7 +67,8 @@ public class WorkflowPlannerService {
 
     private WorkflowDag defaultDag(String question) {
         return new WorkflowDag(List.of(
-                new WorkflowDag.WorkflowStepDef("s1", "data_acquisition", List.of(), Map.of("scenario", "qa"),
+                new WorkflowDag.WorkflowStepDef("s1", "data_acquisition", List.of(),
+                        Map.of("scenario", "qa", "question", question),
                         (int) orchProps.getDefaultStepMaxTimeMs(), (int) orchProps.getDefaultStepTimeoutMs()),
                 new WorkflowDag.WorkflowStepDef("s2", "ai_decision_rag", List.of("s1"), Map.of("text", question),
                         (int) orchProps.getDefaultStepMaxTimeMs(), (int) orchProps.getDefaultStepTimeoutMs()),

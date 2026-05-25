@@ -21,7 +21,7 @@ public final class BuiltinToolCatalog {
         return List.of(
                 new Definition(
                         "data_acquisition", "1.1.0",
-                        "Fetch risk context / features for the current question.",
+                        "LLM generates read-only SQL from schema_catalog + user question; returns context rows.",
                         "DATA_ACQUISITION", "SYNC",
                         compact(ToolJsonSchemas.DATA_ACQUISITION_REQUEST),
                         compact(ToolJsonSchemas.DATA_ACQUISITION_RESPONSE)),

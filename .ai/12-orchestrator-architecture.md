@@ -53,7 +53,7 @@ Local DAG viewer: `GET /workflow.html` (static).
 
 | Tool | Mode | Notes |
 |------|------|--------|
-| `data_acquisition` | SYNC | Risk context |
+| `data_acquisition` | SYNC | schema_catalog → LLM SQL → context rows |
 | `ai_decision_rag` | SYNC | `POST {APP_RAG_API_BASE_URL}/rag/assess` |
 | `similarity_retrieval` | SYNC | Alias → `ai_decision_rag` |
 | `natural_language_to_sql` | SYNC | LLM + `schema_catalog_*`, read-only SELECT |

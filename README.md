@@ -349,7 +349,7 @@ Source: `ToolJsonSchemas.java` + `BuiltinToolCatalog.java`. Runtime executors ar
 
 | Tool | Mode | Description |
 |------|------|-------------|
-| `data_acquisition` | SYNC | Load risk context / features |
+| `data_acquisition` | SYNC | LLM + `schema_catalog_*` → read-only SQL → context rows for the user question |
 | `ai_decision_rag` | SYNC | Hybrid search via **AiDecisionMakingBackend** `POST /rag/assess` |
 | `similarity_retrieval` | SYNC | Legacy alias → `ai_decision_rag` |
 | `natural_language_to_sql` | SYNC | NL → read-only SQL using `schema_catalog_*` |
@@ -384,6 +384,22 @@ Controllers: `backend/src/main/java/com/aidecision/agentic/controller/tool/`
 | natural_language_to_sql | `/agent/tools/natural_language_to_sql/1.1.0` |
 | human_in_the_loop | `/agent/tools/human_in_the_loop/1.1.0` |
 | llm_answer | `/agent/tools/llm_answer/1.1.0` |
+
+Example — data acquisition (schema catalog → SQL → rows):
+
+```http
+POST /agent/tools/data_acquisition/1.1.0/execute
+Content-Type: application/json
+
+{
+  "question": "What risk context exists for user user-demo-001 on recent withdrawals?",
+  "params": {
+    "scenario": "withdrawal_review",
+    "question": "What risk context exists for user user-demo-001 on recent withdrawals?",
+    "maxRows": 20
+  }
+}
+```
 
 Example — execute RAG:
 
@@ -476,6 +492,15 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 17)   # macOS
 | http://localhost:8788/agent/evaluations?status=pending | Evaluation queue |
 
 Port **8788**. CORS default includes `http://localhost:5174`.
+
+## Unit tests
+
+```bash
+cd backend
+./mvnw test
+```
+
+Covers workflow DAG validation, Mermaid rendering, schema catalog / data acquisition / NL2SQL, tool registry & operations, and workflow diagram REST (`@WebMvcTest`).
 
 ## Build JAR
 
