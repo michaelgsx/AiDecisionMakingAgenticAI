@@ -45,6 +45,159 @@ Post-run human review (`GET /agent/evaluations`, `POST .../review`).
 
 Deep dive: [`.ai/12-orchestrator-architecture.md`](./.ai/12-orchestrator-architecture.md)
 
+## LLM workflow planning (examples)
+
+When `POST /agent/ask` is received, `WorkflowPlannerService` builds a **tool catalog** from `orchestrator_tool`, then calls **Azure OpenAI Chat Completions** (`WorkflowPlannerService.callPlannerLlm`). The model must return **JSON only** (`response_format: json_object`). That JSON is validated (known tools, acyclic DAG, ≤ `app.orchestrator.max-steps-per-workflow` steps) and stored on `orchestrator_run.workflow_json`.
+
+Implementation: `backend/src/main/java/com/aidecision/agentic/orchestrator/WorkflowPlannerService.java`
+
+### Example user question
+
+```text
+Should we freeze this $15k withdrawal? User user-demo-001 had a new device yesterday.
+```
+
+### Example planner request (Azure OpenAI)
+
+`POST {AZURE_OPENAI_ENDPOINT}/openai/deployments/ai-rag-agentic-ai/chat/completions?api-version=2024-02-01`
+
+```json
+{
+  "temperature": 0.1,
+  "max_tokens": 4096,
+  "response_format": { "type": "json_object" },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a workflow planner for a risk-control agent. Output ONLY valid JSON (no markdown):\n{\"steps\":[{\"id\":\"s1\",\"tool\":\"<tool_name>\",\"dependsOn\":[],\"params\":{},\"maxTimeMs\":30000,\"timeoutMs\":120000}]}\nRules: use only tools from the catalog; no cycles; max 20 steps; last step should use llm_answer when possible.\nUse ai_decision_rag for similar-case search; natural_language_to_sql for analytics questions;\nhuman_in_the_loop before llm_answer when a proposal needs user sign-off (ASYNC — user approves via API)."
+    },
+    {
+      "role": "user",
+      "content": "Question:\nShould we freeze this $15k withdrawal? User user-demo-001 had a new device yesterday.\n\nTool catalog:\n- data_acquisition v1.0.0 [DATA_ACQUISITION, SYNC]: Fetch risk context / features for the current question.\n  requestSchema: {\"type\":\"object\",\"properties\":{\"scenario\":{\"type\":\"string\"}}}\n  responseSchema: {\"type\":\"object\",\"properties\":{\"features\":{\"type\":\"object\"}}}\n- ai_decision_rag v1.0.0 [SIMILARITY_RETRIEVAL, SYNC]: AiDecisionMakingBackend hybrid RAG assess for similar cases.\n  requestSchema: {\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"},\"metadata\":{\"type\":\"string\"}}}\n  responseSchema: {\"type\":\"object\",\"properties\":{\"hits\":{\"type\":\"array\"},\"aiLabel\":{\"type\":\"string\"},\"summary\":{\"type\":\"string\"}}}\n- natural_language_to_sql v1.0.0 [AGGREGATE, SYNC]: Natural language → read-only SQL using schema_catalog descriptions.\n  requestSchema: {\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"},\"maxRows\":{\"type\":\"integer\"}}}\n  responseSchema: {\"type\":\"object\",\"properties\":{\"sql\":{\"type\":\"string\"},\"rows\":{\"type\":\"array\"},\"rowCount\":{\"type\":\"integer\"}}}\n- human_in_the_loop v1.0.0 [VALIDATION, ASYNC]: Async user approval: is the proposed solution acceptable?\n  requestSchema: {\"type\":\"object\",\"properties\":{\"proposal\":{\"type\":\"string\"},\"prompt\":{\"type\":\"string\"}}}\n  responseSchema: {\"type\":\"object\",\"properties\":{\"decision\":{\"type\":\"string\"},\"accepted\":{\"type\":\"boolean\"}}}\n- llm_answer v1.0.0 [LLM_REASONING, SYNC]: Synthesize final answer from prior workflow step outputs.\n  requestSchema: {\"type\":\"object\",\"properties\":{}}\n  responseSchema: {\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}}}\n"
+    }
+  ]
+}
+```
+
+The **user** message is always:
+
+```text
+Question:
+<user question from POST /agent/ask>
+
+Tool catalog:
+<one line per row in orchestrator_tool: name, type, mode, description, request/response JSON schemas>
+```
+
+### Example LLM response (assistant `content`)
+
+Illustrative JSON the planner expects (field names must match; no markdown fences):
+
+```json
+{
+  "steps": [
+    {
+      "id": "s1",
+      "tool": "data_acquisition",
+      "dependsOn": [],
+      "params": { "scenario": "withdrawal_review" },
+      "maxTimeMs": 30000,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "s2",
+      "tool": "ai_decision_rag",
+      "dependsOn": ["s1"],
+      "params": {
+        "text": "Should we freeze this $15k withdrawal? User user-demo-001 had a new device yesterday.",
+        "metadata": "{\"user_id\":\"user-demo-001\",\"scenario\":\"withdrawal_spike\"}"
+      },
+      "maxTimeMs": 30000,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "s3",
+      "tool": "human_in_the_loop",
+      "dependsOn": ["s1", "s2"],
+      "params": {
+        "prompt": "Is this freeze recommendation acceptable?",
+        "proposal": "Recommend freeze pending review based on similar cases and new device."
+      },
+      "maxTimeMs": 30000,
+      "timeoutMs": 300000
+    },
+    {
+      "id": "s4",
+      "tool": "llm_answer",
+      "dependsOn": ["s1", "s2", "s3"],
+      "params": {},
+      "maxTimeMs": 30000,
+      "timeoutMs": 120000
+    }
+  ]
+}
+```
+
+### Persisted on the run (`orchestrator_run.workflow_json`)
+
+After planning, the same structure is saved (serialized `WorkflowDag`):
+
+```json
+{
+  "steps": [
+    { "id": "s1", "tool": "data_acquisition", "dependsOn": [], "params": { "scenario": "withdrawal_review" }, "maxTimeMs": 30000, "timeoutMs": 120000 },
+    { "id": "s2", "tool": "ai_decision_rag", "dependsOn": ["s1"], "params": { "text": "Should we freeze...", "metadata": "{\"user_id\":\"user-demo-001\"}" }, "maxTimeMs": 30000, "timeoutMs": 120000 },
+    { "id": "s3", "tool": "human_in_the_loop", "dependsOn": ["s1", "s2"], "params": { "prompt": "Is this freeze recommendation acceptable?", "proposal": "Recommend freeze..." }, "maxTimeMs": 30000, "timeoutMs": 300000 },
+    { "id": "s4", "tool": "llm_answer", "dependsOn": ["s1", "s2", "s3"], "params": {}, "maxTimeMs": 30000, "timeoutMs": 120000 }
+  ]
+}
+```
+
+Each step becomes a row in `orchestrator_step` (`step_key` = `id`, `tool_name` = `tool`, `depends_on_json`, `input_json` = `params`).
+
+### Analytics-style question (NL2SQL in the DAG)
+
+**Question:** `How many ingest cases were rejected for login_anomaly last month?`
+
+**Example LLM workflow:**
+
+```json
+{
+  "steps": [
+    {
+      "id": "s1",
+      "tool": "natural_language_to_sql",
+      "dependsOn": [],
+      "params": { "question": "How many ingest cases were rejected for login_anomaly last month?", "maxRows": 100 },
+      "maxTimeMs": 30000,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "s2",
+      "tool": "llm_answer",
+      "dependsOn": ["s1"],
+      "params": {},
+      "maxTimeMs": 30000,
+      "timeoutMs": 120000
+    }
+  ]
+}
+```
+
+### Fallback when OpenAI is unavailable
+
+If chat is not configured or planning fails validation, a fixed default DAG is used:
+
+```json
+{
+  "steps": [
+    { "id": "s1", "tool": "data_acquisition", "dependsOn": [], "params": { "scenario": "qa" }, "maxTimeMs": 30000, "timeoutMs": 120000 },
+    { "id": "s2", "tool": "ai_decision_rag", "dependsOn": ["s1"], "params": { "text": "<original question>" }, "maxTimeMs": 30000, "timeoutMs": 120000 },
+    { "id": "s3", "tool": "llm_answer", "dependsOn": ["s1", "s2"], "params": {}, "maxTimeMs": 30000, "timeoutMs": 120000 }
+  ]
+}
+```
+
 ## Tool registration at startup
 
 On each application start, `ToolRegistryStartup` inserts built-in tools into `orchestrator_tool` **only when the tool name is not already present** (existing rows are left unchanged). Runtime executors are Spring beans implementing `AgentTool`; metadata lives in `BuiltinToolCatalog`.
