@@ -61,6 +61,10 @@ public class LlmSqlGenerationService {
         this.http = http;
     }
 
+    public boolean isChatConfigured() {
+        return openAi.chatConfigured();
+    }
+
     public String generateSql(String question, Mode mode, List<String> tableNames) throws Exception {
         if (!openAi.chatConfigured()) {
             return fallbackSql(mode, tableNames);
@@ -73,18 +77,33 @@ public class LlmSqlGenerationService {
                 + "\n\nUser question:\n"
                 + question;
 
-        String raw = callChat(system, user);
+        String raw = chatComplete(system, user, 1024, 0.1);
         return extractSql(raw);
     }
 
+    /** Used by {@link DataAcquisitionPlannerService} when Azure OpenAI is not configured. */
+    public String fallbackAcquisitionSql(List<String> tableNames) {
+        return fallbackSql(Mode.DATA_ACQUISITION, tableNames);
+    }
+
+    public String chatComplete(String system, String user, int maxTokens, double temperature)
+            throws Exception {
+        return callChat(system, user, maxTokens, temperature);
+    }
+
     private String callChat(String system, String user) throws Exception {
+        return callChat(system, user, 1024, 0.1);
+    }
+
+    private String callChat(String system, String user, int maxTokens, double temperature)
+            throws Exception {
         String base = openAi.getEndpoint().replaceAll("/+$", "");
         URI uri = URI.create(base + "/openai/deployments/" + openAi.getChatDeployment()
                 + "/chat/completions?api-version=" + openAi.getEffectiveChatApiVersion());
 
         ObjectNode root = mapper.createObjectNode();
-        root.put("temperature", 0.1);
-        root.put("max_tokens", 1024);
+        root.put("temperature", temperature);
+        root.put("max_tokens", maxTokens);
         ArrayNode messages = root.putArray("messages");
         messages.addObject().put("role", "system").put("content", system);
         messages.addObject().put("role", "user").put("content", user);

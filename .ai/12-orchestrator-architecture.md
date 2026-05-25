@@ -21,7 +21,10 @@
 | GET | `/agent/runs/{runId}/workflow-diagram` | Mermaid DAG for the run |
 | POST | `/agent/workflow/diagram` | Mermaid from arbitrary workflow JSON |
 | POST | `/agent/runs/{runId}/resume` |
-| POST | `/agent/runs/{runId}/human-response` | Accept/reject `human_in_the_loop` proposal |
+| POST | `/agent/execute` | Inline run; `pendingAsync` when blocked on async tools |
+| POST | `/agent/runs/{runId}/feedback` | INPUT_REQUIRED async (`human_in_the_loop`, …) |
+| POST | `/agent/runs/{runId}/poll` | POLL_ONLY async (no user input) |
+| POST | `/agent/runs/{runId}/human-response` | Legacy → feedback |
 | GET | `/agent/tools` |
 | POST | `/agent/tools` |
 | POST | `/agent/feedback` |
@@ -53,7 +56,7 @@ Local DAG viewer: `GET /workflow.html` (static).
 
 | Tool | Mode | Notes |
 |------|------|--------|
-| `data_acquisition` | SYNC | schema_catalog → LLM SQL → context rows |
+| `data_acquisition` | SYNC | schema_catalog (table index → LLM pick tables → columns+FK → LLM SQL) → context rows |
 | `ai_decision_rag` | SYNC | `POST {APP_RAG_API_BASE_URL}/rag/assess` |
 | `similarity_retrieval` | SYNC | Alias → `ai_decision_rag` |
 | `natural_language_to_sql` | SYNC | LLM + `schema_catalog_*`, read-only SELECT |

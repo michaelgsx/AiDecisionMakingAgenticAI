@@ -2,10 +2,15 @@ package com.aidecision.agentic.controller;
 
 import com.aidecision.agentic.dto.AskRequest;
 import com.aidecision.agentic.dto.AskResponse;
+import com.aidecision.agentic.dto.AsyncToolFeedbackRequest;
+import com.aidecision.agentic.dto.AsyncToolPollRequest;
+import com.aidecision.agentic.dto.ExecuteRequest;
+import com.aidecision.agentic.dto.ExecuteResponse;
 import com.aidecision.agentic.dto.HumanResponseRequest;
 import com.aidecision.agentic.dto.RunStatusResponse;
 import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.orchestrator.OrchestratorEngine;
+import com.aidecision.agentic.service.OrchestratorExecuteService;
 import com.aidecision.agentic.service.OrchestratorQueryService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,13 +28,18 @@ public class OrchestratorController {
 
     private final OrchestratorEngine engine;
     private final OrchestratorQueryService query;
+    private final OrchestratorExecuteService executeService;
 
-    public OrchestratorController(OrchestratorEngine engine, OrchestratorQueryService query) {
+    public OrchestratorController(
+            OrchestratorEngine engine,
+            OrchestratorQueryService query,
+            OrchestratorExecuteService executeService) {
         this.engine = engine;
         this.query = query;
+        this.executeService = executeService;
     }
 
-    /** Frontend submits a question; poll GET /agent/runs/{runId} until COMPLETED or FAILED. */
+    /** Submit question; poll {@code GET /agent/runs/{runId}} until complete or async pending. */
     @PostMapping("/ask")
     public AskResponse ask(@Valid @RequestBody AskRequest request) {
         UUID conversationId = parseUuid(request.conversationId());
@@ -38,6 +48,15 @@ public class OrchestratorController {
                 run.getRunId().toString(),
                 run.getStatus(),
                 "/agent/runs/" + run.getRunId());
+    }
+
+    /**
+     * Run workflow inline: returns final answer when all tools are SYNC; otherwise returns
+     * {@code pendingAsync} with requestId, stepKey, toolName/version, and feedback/poll paths.
+     */
+    @PostMapping("/execute")
+    public ExecuteResponse execute(@Valid @RequestBody ExecuteRequest request) throws InterruptedException {
+        return executeService.execute(request);
     }
 
     @GetMapping("/runs/{runId}")
@@ -50,7 +69,23 @@ public class OrchestratorController {
         return query.resume(UUID.fromString(runId));
     }
 
-    /** User accepts or rejects a human_in_the_loop proposal; run continues asynchronously. */
+    /** Feedback for INPUT_REQUIRED async tools (e.g. human_in_the_loop accept/reject). */
+    @PostMapping("/runs/{runId}/feedback")
+    public RunStatusResponse feedback(
+            @PathVariable String runId,
+            @Valid @RequestBody AsyncToolFeedbackRequest body) {
+        return query.submitFeedback(UUID.fromString(runId), body);
+    }
+
+    /** Poll-only async tools (no user input). */
+    @PostMapping("/runs/{runId}/poll")
+    public RunStatusResponse poll(
+            @PathVariable String runId,
+            @Valid @RequestBody AsyncToolPollRequest body) {
+        return executeService.pollAsyncStep(UUID.fromString(runId), body);
+    }
+
+    /** @deprecated Prefer {@link #feedback}; kept for backward compatibility. */
     @PostMapping("/runs/{runId}/human-response")
     public RunStatusResponse humanResponse(
             @PathVariable String runId,

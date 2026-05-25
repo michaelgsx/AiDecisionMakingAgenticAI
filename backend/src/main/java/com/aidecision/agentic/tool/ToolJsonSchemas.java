@@ -8,7 +8,7 @@ final class ToolJsonSchemas {
     static final String DATA_ACQUISITION_REQUEST = """
             {
               "type": "object",
-              "description": "NL question + scenario; LLM generates read-only SQL from schema_catalog descriptions.",
+              "description": "NL question + scenario; two-phase LLM: pick tables from catalog index, then generate SQL from columns + foreign keys.",
               "properties": {
                 "scenario": {
                   "type": "string",
@@ -25,7 +25,7 @@ final class ToolJsonSchemas {
                 "tableNames": {
                   "type": "array",
                   "items": { "type": "string" },
-                  "description": "Optional override: only these schema_catalog tables in the LLM prompt."
+                  "description": "Optional override: candidate tables for phase-1 selection (skips scenario default list)."
                 }
               }
             }
@@ -37,10 +37,19 @@ final class ToolJsonSchemas {
               "description": "SQL-backed context for downstream tools (RAG metadata, llm_answer).",
               "properties": {
                 "scenario": { "type": "string", "description": "Scenario id used for table scoping." },
+                "candidateTables": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Tables offered to phase-1 LLM (scenario scope or tableNames override)."
+                },
                 "tables": {
                   "type": "array",
                   "items": { "type": "string" },
-                  "description": "schema_catalog tables included in the LLM prompt."
+                  "description": "Tables chosen in phase 1 for column/FK SQL generation."
+                },
+                "tableSelectionReason": {
+                  "type": "string",
+                  "description": "Phase-1 LLM rationale for chosen tables."
                 },
                 "sql": { "type": "string", "description": "Generated read-only SELECT executed against Azure SQL." },
                 "rows": {

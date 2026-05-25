@@ -31,7 +31,9 @@ class DataAcquisitionToolTest {
         when(acquisition.acquire(eq("freeze?"), eq("qa"), eq(50), anyList()))
                 .thenReturn(new DataAcquisitionService.AcquisitionResult(
                         "qa",
+                        List.of("risk_features", "risk_decisions"),
                         List.of("risk_features"),
+                        "need case rows",
                         "SELECT TOP 1 * FROM dbo.risk_features",
                         List.of(Map.of("user_id", "u1")),
                         1,

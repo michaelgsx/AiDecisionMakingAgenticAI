@@ -1,8 +1,10 @@
 package com.aidecision.agentic.service;
 
 import com.aidecision.agentic.entity.SchemaCatalogColumn;
+import com.aidecision.agentic.entity.SchemaCatalogForeignKey;
 import com.aidecision.agentic.entity.SchemaCatalogTable;
 import com.aidecision.agentic.repository.SchemaCatalogColumnRepository;
+import com.aidecision.agentic.repository.SchemaCatalogForeignKeyRepository;
 import com.aidecision.agentic.repository.SchemaCatalogTableRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,12 +21,15 @@ public class SchemaCatalogService {
 
     private final SchemaCatalogTableRepository tableRepo;
     private final SchemaCatalogColumnRepository columnRepo;
+    private final SchemaCatalogForeignKeyRepository foreignKeyRepo;
 
     public SchemaCatalogService(
             SchemaCatalogTableRepository tableRepo,
-            SchemaCatalogColumnRepository columnRepo) {
+            SchemaCatalogColumnRepository columnRepo,
+            SchemaCatalogForeignKeyRepository foreignKeyRepo) {
         this.tableRepo = tableRepo;
         this.columnRepo = columnRepo;
+        this.foreignKeyRepo = foreignKeyRepo;
     }
 
     private static final Map<String, List<String>> SCENARIO_TABLES = Map.of(
@@ -75,6 +80,74 @@ public class SchemaCatalogService {
             sb.append("\n");
         }
         return sb.toString().trim();
+    }
+
+    /** Phase 1: table names and descriptions only (for LLM table selection). */
+    @Transactional(readOnly = true)
+    public String buildTableIndexText(List<String> tableNames) {
+        List<SchemaCatalogTable> tables = filterTables(tableNames);
+        if (tables.isEmpty()) {
+            return "(schema catalog empty — run db migrations V4/V5/V8)";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (SchemaCatalogTable t : tables) {
+            sb.append("- ").append(t.getTableName())
+                    .append(" (").append(t.getSchemaName()).append("): ")
+                    .append(t.getDescription()).append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    /** Phase 2: columns + foreign keys for selected tables (for LLM SQL generation). */
+    @Transactional(readOnly = true)
+    public String buildColumnAndForeignKeyText(List<String> tableNames) {
+        List<SchemaCatalogTable> tables = filterTables(tableNames);
+        if (tables.isEmpty()) {
+            return "(no tables selected)";
+        }
+        List<String> names = tables.stream().map(SchemaCatalogTable::getTableName).toList();
+
+        StringBuilder sb = new StringBuilder();
+        for (SchemaCatalogTable t : tables) {
+            sb.append("TABLE ").append(t.getSchemaName()).append(".").append(t.getTableName())
+                    .append(": ").append(t.getDescription()).append("\n");
+            List<SchemaCatalogColumn> cols =
+                    columnRepo.findByTableNameAndEnabledTrueOrderByColumnNameAsc(t.getTableName());
+            for (SchemaCatalogColumn c : cols) {
+                sb.append("  - ").append(c.getColumnName());
+                if (c.getDataType() != null) {
+                    sb.append(" (").append(c.getDataType()).append(")");
+                }
+                sb.append(": ").append(c.getDescription());
+                if (c.getSampleHint() != null && !c.getSampleHint().isBlank()) {
+                    sb.append(" [example: ").append(c.getSampleHint()).append("]");
+                }
+                sb.append("\n");
+            }
+            sb.append("\n");
+        }
+
+        List<SchemaCatalogForeignKey> fks = foreignKeyRepo.findEnabledInvolvingTables(names);
+        if (!fks.isEmpty()) {
+            sb.append("FOREIGN KEYS (use for JOINs; from_column references to_column):\n");
+            for (SchemaCatalogForeignKey fk : fks) {
+                sb.append("  - ").append(fk.getFromTable()).append(".").append(fk.getFromColumn())
+                        .append(" -> ").append(fk.getToTable()).append(".").append(fk.getToColumn())
+                        .append(": ").append(fk.getDescription()).append("\n");
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    private List<SchemaCatalogTable> filterTables(List<String> tableNames) {
+        List<SchemaCatalogTable> tables = tableRepo.findByEnabledTrueOrderByTableNameAsc();
+        if (tableNames != null && !tableNames.isEmpty()) {
+            Set<String> allowed = new HashSet<>(tableNames);
+            tables = tables.stream()
+                    .filter(t -> allowed.contains(t.getTableName()))
+                    .toList();
+        }
+        return tables;
     }
 
     @Transactional(readOnly = true)

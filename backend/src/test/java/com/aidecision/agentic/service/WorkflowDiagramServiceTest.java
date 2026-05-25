@@ -60,10 +60,15 @@ class WorkflowDiagramServiceTest {
                 null,
                 json,
                 null,
+                null,
+                null,
                 List.of(new RunStatusResponse.StepStatusDto(
-                        UUID.randomUUID().toString(), "s1", "data_acquisition", "RUNNING", null, 1)),
+                        UUID.randomUUID().toString(), "s1", "data_acquisition", "1.1.0", "RUNNING", null, 1)),
                 false,
-                List.of());
+                List.of(),
+                false,
+                List.of(),
+                new RunStatusResponse.RunPaths("/agent/runs/x", "/agent/runs/x/feedback", "/agent/runs/x/poll"));
 
         String mermaid = service.mermaidForRunStatus(run);
 

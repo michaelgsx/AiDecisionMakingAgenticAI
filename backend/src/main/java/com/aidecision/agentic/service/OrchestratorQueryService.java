@@ -1,5 +1,7 @@
 package com.aidecision.agentic.service;
 
+import com.aidecision.agentic.dto.AsyncToolFeedbackRequest;
+import com.aidecision.agentic.dto.HumanResponseRequest;
 import com.aidecision.agentic.dto.RunStatusResponse;
 import com.aidecision.agentic.entity.OrchestratorHumanRequest;
 import com.aidecision.agentic.entity.OrchestratorRun;
@@ -11,7 +13,6 @@ import com.aidecision.agentic.repository.OrchestratorStepRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -21,88 +22,57 @@ public class OrchestratorQueryService {
     private final OrchestratorStepRepository stepRepo;
     private final OrchestratorEngine engine;
     private final HumanInLoopService humanInLoop;
-    private final WorkflowDiagramService workflowDiagrams;
+    private final OrchestratorRunAssembler assembler;
+    private final OrchestratorExecuteService executeService;
 
     public OrchestratorQueryService(
             OrchestratorRunRepository runRepo,
             OrchestratorStepRepository stepRepo,
             OrchestratorEngine engine,
             HumanInLoopService humanInLoop,
-            WorkflowDiagramService workflowDiagrams) {
+            OrchestratorRunAssembler assembler,
+            OrchestratorExecuteService executeService) {
         this.runRepo = runRepo;
         this.stepRepo = stepRepo;
         this.engine = engine;
         this.humanInLoop = humanInLoop;
-        this.workflowDiagrams = workflowDiagrams;
+        this.assembler = assembler;
+        this.executeService = executeService;
     }
 
     @Transactional(readOnly = true)
     public RunStatusResponse getRun(UUID runId) {
         OrchestratorRun run = runRepo.findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown runId: " + runId));
-        List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(runId);
-
-        List<RunStatusResponse.StepStatusDto> stepDtos = steps.stream()
-                .map(s -> new RunStatusResponse.StepStatusDto(
-                        s.getStepId().toString(),
-                        s.getStepKey(),
-                        s.getToolName(),
-                        s.getStatus(),
-                        s.getErrorMessage(),
-                        s.getAttemptCount()))
-                .toList();
-
-        List<OrchestratorHumanRequest> pending = humanInLoop.pendingForRun(runId);
-        List<RunStatusResponse.HumanApprovalDto> approvals = pending.stream()
-                .map(r -> new RunStatusResponse.HumanApprovalDto(
-                        r.getRequestId().toString(),
-                        r.getStepKey(),
-                        r.getPrompt(),
-                        r.getProposal()))
-                .toList();
-
-        String workflowJson = run.getWorkflowJson();
-        String mermaid = null;
-        if (workflowJson != null && !workflowJson.isBlank()) {
-            RunStatusResponse forDiagram = new RunStatusResponse(
-                    run.getRunId().toString(),
-                    run.getStatus(),
-                    run.getQuestion(),
-                    run.getAnswerText(),
-                    run.getErrorMessage(),
-                    workflowJson,
-                    null,
-                    stepDtos,
-                    !approvals.isEmpty(),
-                    approvals);
-            mermaid = workflowDiagrams.mermaidForRunStatus(forDiagram);
-        }
-        return new RunStatusResponse(
-                run.getRunId().toString(),
-                run.getStatus(),
-                run.getQuestion(),
-                run.getAnswerText(),
-                run.getErrorMessage(),
-                workflowJson,
-                mermaid,
-                stepDtos,
-                !approvals.isEmpty(),
-                approvals);
+        return assembler.toRunStatus(run, stepRepo.findByRunIdOrderByCreatedAtAsc(runId));
     }
 
     @Transactional
     public RunStatusResponse submitHumanResponse(UUID runId, UUID requestId, String decision, String comment) {
-        OrchestratorHumanRequest req = humanInLoop.getRequest(requestId);
-        if (!req.getRunId().equals(runId)) {
-            throw new IllegalArgumentException("requestId does not belong to runId");
-        }
-        humanInLoop.answer(requestId, decision, comment);
-        try {
-            engine.processRun(runId);
-        } catch (Exception e) {
-            throw new IllegalStateException("Could not resume run after human response: " + e.getMessage(), e);
-        }
-        return getRun(runId);
+        OrchestratorStep step = stepRepo.findByRunIdOrderByCreatedAtAsc(runId).stream()
+                .filter(s -> {
+                    OrchestratorHumanRequest req = humanInLoop.findByRunAndStepKey(runId, s.getStepKey());
+                    return req != null && requestId.equals(req.getRequestId());
+                })
+                .findFirst()
+                .orElse(null);
+        String stepKey = step != null ? step.getStepKey() : humanInLoop.getRequest(requestId).getStepKey();
+        return executeService.submitFeedback(
+                runId,
+                new AsyncToolFeedbackRequest(
+                        requestId.toString(),
+                        stepKey,
+                        null,
+                        null,
+                        null,
+                        decision,
+                        comment,
+                        null));
+    }
+
+    @Transactional
+    public RunStatusResponse submitFeedback(UUID runId, AsyncToolFeedbackRequest body) {
+        return executeService.submitFeedback(runId, body);
     }
 
     @Transactional
@@ -118,5 +88,12 @@ public class OrchestratorQueryService {
             throw new IllegalStateException("Resume failed: " + e.getMessage(), e);
         }
         return getRun(runId);
+    }
+
+    private static UUID parseUuid(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        return UUID.fromString(raw.trim());
     }
 }

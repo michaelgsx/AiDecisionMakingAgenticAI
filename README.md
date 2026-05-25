@@ -349,7 +349,7 @@ Source: `ToolJsonSchemas.java` + `BuiltinToolCatalog.java`. Runtime executors ar
 
 | Tool | Mode | Description |
 |------|------|-------------|
-| `data_acquisition` | SYNC | LLM + `schema_catalog_*` → read-only SQL → context rows for the user question |
+| `data_acquisition` | SYNC | Two-phase LLM: `schema_catalog_table` index → pick tables → columns + `schema_catalog_foreign_key` → SQL → context rows |
 | `ai_decision_rag` | SYNC | Hybrid search via **AiDecisionMakingBackend** `POST /rag/assess` |
 | `similarity_retrieval` | SYNC | Legacy alias → `ai_decision_rag` |
 | `natural_language_to_sql` | SYNC | NL → read-only SQL using `schema_catalog_*` |
@@ -423,16 +423,69 @@ POST /agent/tools/human_in_the_loop/1.1.0/poll
 { "priorOutput": { "requestId": "...", "status": "WAITING" }, "runId": "...", "stepKey": "s3" }
 ```
 
+### Orchestrator execute + async feedback
+
+**`POST /agent/execute`** runs sync steps immediately. If the DAG hits an async tool:
+
+- **`INPUT_REQUIRED`** (e.g. `human_in_the_loop`) → response includes `pendingAsync[]` with `requestId`, `stepKey`, `toolName`, `toolVersion`, `allowedDecisions`, `feedbackPath`.
+- **`POLL_ONLY`** (slow tools, no user input) → `pendingAsync[]` with `pollPath`; client calls **`POST /agent/runs/{runId}/poll`**.
+
+When every tool is SYNC, `completed: true` and `answer` are set in the same response.
+
+```http
+POST /agent/execute
+{ "question": "Should we freeze this withdrawal?", "userId": "user-demo-001", "transactionId": "tx-123" }
+```
+
+```json
+{
+  "runId": "...",
+  "workflowId": "...",
+  "status": "WAITING_ASYNC",
+  "completed": false,
+  "waitingForAsync": true,
+  "pendingAsync": [{
+    "requestId": "...",
+    "stepKey": "s3",
+    "toolName": "human_in_the_loop",
+    "toolVersion": "1.1.0",
+    "asyncKind": "INPUT_REQUIRED",
+    "prompt": "Is this freeze acceptable?",
+    "proposal": "Recommend freeze...",
+    "allowedDecisions": ["accept", "reject"],
+    "feedbackPath": "/agent/runs/.../feedback"
+  }],
+  "pollPath": "/agent/runs/...",
+  "feedbackPath": "/agent/runs/.../feedback"
+}
+```
+
+```http
+POST /agent/runs/{runId}/feedback
+{
+  "requestId": "...",
+  "stepKey": "s3",
+  "userId": "user-demo-001",
+  "toolName": "human_in_the_loop",
+  "toolVersion": "1.1.0",
+  "result": "accept",
+  "comment": "Looks correct"
+}
+```
+
 ## API
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/agent/ask` | Submit question → `{ runId, status, pollPath }` |
-| GET | `/agent/runs/{runId}` | Poll status, steps, `workflowJson`, `workflowMermaid`, `pendingApprovals` |
+| POST | `/agent/ask` | Submit question → `{ runId, status, pollPath }` (async worker) |
+| POST | `/agent/execute` | Run inline: full answer if all SYNC; else `pendingAsync` handles |
+| GET | `/agent/runs/{runId}` | Poll status, steps, `workflowJson`, `workflowMermaid`, `pendingAsync` |
+| POST | `/agent/runs/{runId}/feedback` | **INPUT_REQUIRED** async tools (`requestId`, `stepKey`, `result`, `toolName`, `userId`, …) |
+| POST | `/agent/runs/{runId}/poll` | **POLL_ONLY** async tools (no user input) |
 | GET | `/agent/runs/{runId}/workflow-diagram` | Mermaid flowchart for the run DAG |
 | POST | `/agent/workflow/diagram` | Mermaid from arbitrary workflow JSON |
 | POST | `/agent/runs/{runId}/resume` | Resume a **FAILED** run |
-| POST | `/agent/runs/{runId}/human-response` | Answer `human_in_the_loop` step |
+| POST | `/agent/runs/{runId}/human-response` | Legacy alias → `/feedback` for `human_in_the_loop` |
 | GET | `/agent/evaluations?status=pending` | Human review queue (`pending` \| `accepted` \| `rejected` \| `all`) |
 | POST | `/agent/evaluations/{evaluationId}/review` | `{ decision: accept\|reject, reviewerId?, comment? }` |
 | GET | `/agent/tools` | Tool registry (schemas, SYNC/ASYNC) |

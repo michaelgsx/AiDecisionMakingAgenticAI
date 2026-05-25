@@ -19,7 +19,7 @@ import static org.mockito.Mockito.when;
 class DataAcquisitionServiceTest {
 
     @Mock
-    private LlmSqlGenerationService sqlGeneration;
+    private DataAcquisitionPlannerService planner;
     @Mock
     private SchemaCatalogService catalog;
     @Mock
@@ -29,13 +29,13 @@ class DataAcquisitionServiceTest {
     private DataAcquisitionService service;
 
     @Test
-    void acquire_generatesSqlAndReturnsRows() throws Exception {
+    void acquire_twoPhaseThenExecutesSql() throws Exception {
         when(catalog.tablesForScenario("withdrawal_review"))
-                .thenReturn(List.of("risk_features", "risk_decisions"));
-        when(sqlGeneration.generateSql(
-                eq("freeze withdrawal?"),
-                eq(LlmSqlGenerationService.Mode.DATA_ACQUISITION),
-                eq(List.of("risk_features", "risk_decisions"))))
+                .thenReturn(List.of("risk_features", "risk_decisions", "risk_ingest_records"));
+        when(planner.selectTables(eq("freeze withdrawal?"), any()))
+                .thenReturn(new DataAcquisitionPlannerService.TableSelection(
+                        List.of("risk_features", "risk_decisions"), "case and decision"));
+        when(planner.generateSql(eq("freeze withdrawal?"), eq(List.of("risk_features", "risk_decisions")), eq(20)))
                 .thenReturn("SELECT TOP 5 * FROM dbo.risk_features");
         when(sqlExecutor.executeSelect(any(), eq(20)))
                 .thenReturn(List.of(Map.of("user_id", "user-demo-001")));
@@ -43,10 +43,10 @@ class DataAcquisitionServiceTest {
         DataAcquisitionService.AcquisitionResult result =
                 service.acquire("freeze withdrawal?", "withdrawal_review", 20, List.of());
 
+        assertThat(result.tables()).containsExactly("risk_features", "risk_decisions");
+        assertThat(result.tableSelectionReason()).contains("decision");
         assertThat(result.sql()).contains("risk_features");
-        assertThat(result.rowCount()).isEqualTo(1);
-        assertThat(result.features()).containsEntry("scenario", "withdrawal_review");
-        assertThat(result.features()).containsEntry("source", "schema_catalog_sql");
+        assertThat(result.features()).containsEntry("source", "schema_catalog_two_phase_sql");
         verify(sqlExecutor).executeSelect("SELECT TOP 5 * FROM dbo.risk_features", 20);
     }
 }

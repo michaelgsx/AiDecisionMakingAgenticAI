@@ -46,7 +46,9 @@ public class DataAcquisitionTool implements AgentTool {
                     acquisition.acquire(question, scenario, maxRows, tableNames);
             return ToolResult.ok(Map.of(
                     "scenario", result.scenario(),
+                    "candidateTables", result.candidateTables(),
                     "tables", result.tables(),
+                    "tableSelectionReason", result.tableSelectionReason(),
                     "sql", result.sql(),
                     "rows", result.rows(),
                     "rowCount", result.rowCount(),
