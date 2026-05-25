@@ -8,16 +8,21 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import java.net.URI;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
 @Service
 public class WorkflowPlannerService {
+
+    private static final Logger log = LoggerFactory.getLogger(WorkflowPlannerService.class);
 
     private final AzureOpenAiProperties openAi;
     private final OrchestratorProperties orchProps;
@@ -43,13 +48,16 @@ public class WorkflowPlannerService {
 
     public WorkflowDag plan(String question) throws Exception {
         Map<String, OrchestratorTool> tools = toolRegistry.enabledToolsByName();
-        if (openAi.chatConfigured()) {
+        if (tools.isEmpty()) {
+            log.warn("No enabled tools in orchestrator_tool; using default DAG only");
+        }
+        if (openAi.chatConfigured() && !tools.isEmpty()) {
             try {
                 WorkflowDag dag = parseDag(callPlannerLlm(question, tools));
                 validator.validate(dag, tools);
                 return dag;
             } catch (Exception e) {
-                // fall through to default DAG
+                log.warn("LLM workflow planning failed, using default DAG: {}", e.getMessage());
             }
         }
         WorkflowDag fallback = defaultDag(question);
@@ -73,21 +81,9 @@ public class WorkflowPlannerService {
         URI uri = URI.create(base + "/openai/deployments/" + openAi.getChatDeployment()
                 + "/chat/completions?api-version=" + openAi.getEffectiveChatApiVersion());
 
-        StringBuilder catalog = new StringBuilder();
-        for (OrchestratorTool t : tools.values()) {
-            catalog.append("- ").append(t.getToolName()).append(" v").append(t.getVersion())
-                    .append(" [").append(t.getToolType()).append(", ").append(t.getExecutionMode()).append("]: ")
-                    .append(t.getDescription()).append("\n  requestSchema: ").append(t.getRequestSchemaJson())
-                    .append("\n  responseSchema: ").append(t.getResponseSchemaJson()).append("\n");
-        }
-
-        String system = """
-                You are a workflow planner for a risk-control agent. Output ONLY valid JSON (no markdown):
-                {"steps":[{"id":"s1","tool":"<tool_name>","dependsOn":[],"params":{},"maxTimeMs":30000,"timeoutMs":120000}]}
-                Rules: use only tools from the catalog; no cycles; max %d steps; last step should use llm_answer when possible.
-                Use ai_decision_rag for similar-case search; natural_language_to_sql for analytics questions;
-                human_in_the_loop before llm_answer when a proposal needs user sign-off (ASYNC — user approves via API).
-                """.formatted(orchProps.getMaxStepsPerWorkflow());
+        String toolRegistryJson = buildToolRegistryJson(tools);
+        String system = buildSystemPrompt();
+        String user = buildUserPrompt(question, toolRegistryJson);
 
         ObjectNode root = mapper.createObjectNode();
         root.put("temperature", 0.1);
@@ -95,8 +91,7 @@ public class WorkflowPlannerService {
         root.set("response_format", mapper.createObjectNode().put("type", "json_object"));
         ArrayNode messages = root.putArray("messages");
         messages.addObject().put("role", "system").put("content", system);
-        messages.addObject().put("role", "user").put("content",
-                "Question:\n" + question + "\n\nTool catalog:\n" + catalog);
+        messages.addObject().put("role", "user").put("content", user);
 
         String body = http.post()
                 .uri(uri)
@@ -108,6 +103,89 @@ public class WorkflowPlannerService {
 
         JsonNode json = mapper.readTree(body == null ? "{}" : body);
         return json.path("choices").path(0).path("message").path("content").asText("");
+    }
+
+    /** Full orchestrator_tool rows as JSON for the planner (sorted by tool_name). */
+    String buildToolRegistryJson(Map<String, OrchestratorTool> tools) throws Exception {
+        ArrayNode registry = mapper.createArrayNode();
+        tools.values().stream()
+                .sorted(Comparator.comparing(OrchestratorTool::getToolName))
+                .forEach(t -> {
+                    ObjectNode row = registry.addObject();
+                    row.put("toolName", t.getToolName());
+                    row.put("version", t.getVersion());
+                    row.put("toolType", t.getToolType());
+                    row.put("executionMode", t.getExecutionMode());
+                    row.put("description", t.getDescription());
+                    row.set("requestSchema", parseSchemaNode(t.getRequestSchemaJson()));
+                    row.set("responseSchema", parseSchemaNode(t.getResponseSchemaJson()));
+                });
+        return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(registry);
+    }
+
+    private JsonNode parseSchemaNode(String schemaJson) {
+        if (schemaJson == null || schemaJson.isBlank()) {
+            return mapper.createObjectNode();
+        }
+        try {
+            return mapper.readTree(schemaJson);
+        } catch (Exception e) {
+            return mapper.createObjectNode().put("raw", schemaJson);
+        }
+    }
+
+    private String buildSystemPrompt() {
+        int maxSteps = orchProps.getMaxStepsPerWorkflow();
+        long defaultMax = orchProps.getDefaultStepMaxTimeMs();
+        long defaultTimeout = orchProps.getDefaultStepTimeoutMs();
+        return """
+                You are the workflow planner for a risk-control agent orchestrator.
+
+                Your task: given a user question and the TOOL REGISTRY (orchestrator_tool), \
+                CREATE a complete execution workflow — a directed acyclic graph (DAG) of tool steps \
+                that answers the question. Output ONLY one JSON object (no markdown, no commentary).
+
+                Required output shape:
+                {
+                  "steps": [
+                    {
+                      "id": "s1",
+                      "tool": "<toolName from registry>",
+                      "dependsOn": [],
+                      "params": { },
+                      "maxTimeMs": %d,
+                      "timeoutMs": %d
+                    }
+                  ]
+                }
+
+                Planning rules:
+                1. Use ONLY toolName values present in toolRegistry (enabled tools).
+                2. Every step.id must be unique (e.g. s1, s2, s3).
+                3. dependsOn lists step ids that must finish before this step; no cycles.
+                4. params must match that tool's requestSchema (fill literals from the user question where needed).
+                5. At most %d steps. The LAST step should be llm_answer when possible.
+                6. Similar-case / policy questions: include ai_decision_rag (or similarity_retrieval).
+                7. Counts, aggregates, SQL analytics: include natural_language_to_sql before llm_answer.
+                8. When a human must approve a recommendation before the final answer: insert human_in_the_loop \
+                   (ASYNC) before llm_answer; downstream steps depend on it.
+                9. ASYNC tools stay RUNNING until the user responds via API — give them longer timeoutMs if needed.
+                10. data_acquisition is optional context at the start when features/scenario help later tools.
+                """
+                .formatted(defaultMax, defaultTimeout, maxSteps);
+    }
+
+    private String buildUserPrompt(String question, String toolRegistryJson) {
+        return """
+                Create the workflow DAG for the following user question.
+
+                userQuestion:
+                %s
+
+                toolRegistry (from orchestrator_tool — use only these tools):
+                %s
+                """
+                .formatted(question.trim(), toolRegistryJson);
     }
 
     private WorkflowDag parseDag(String json) throws Exception {

@@ -35,17 +35,97 @@ Deep dive: [`.ai/12-orchestrator-architecture.md`](./.ai/12-orchestrator-archite
 
 ## LLM workflow planning (examples)
 
-When `POST /agent/ask` is received, `WorkflowPlannerService` builds a **tool catalog** from `orchestrator_tool`, then calls **Azure OpenAI Chat Completions** (`WorkflowPlannerService.callPlannerLlm`). The model must return **JSON only** (`response_format: json_object`). That JSON is validated (known tools, acyclic DAG, ≤ `app.orchestrator.max-steps-per-workflow` steps) and stored on `orchestrator_run.workflow_json`.
+When `POST /agent/ask` is received, `WorkflowPlannerService` loads **all enabled rows** from `orchestrator_tool` (the tool registry), serializes them as JSON, and asks the LLM to **CREATE a workflow DAG** for the user question. The model returns **JSON only** (`response_format: json_object`). That JSON is validated and stored on `orchestrator_run.workflow_json`.
 
 Implementation: `backend/src/main/java/com/aidecision/agentic/orchestrator/WorkflowPlannerService.java`
 
-### Example user question
+### Example user question (`userQuestion`)
 
 ```text
 Should we freeze this $15k withdrawal? User user-demo-001 had a new device yesterday.
 ```
 
-### Example planner request (Azure OpenAI)
+### System message (task + output contract)
+
+The system prompt explicitly tells the model to **create a complete execution workflow (DAG)** and lists planning rules (registry-only tools, acyclic deps, `llm_answer` last, when to use RAG / NL2SQL / human-in-the-loop).
+
+```text
+You are the workflow planner for a risk-control agent orchestrator.
+
+Your task: given a user question and the TOOL REGISTRY (orchestrator_tool),
+CREATE a complete execution workflow — a directed acyclic graph (DAG) of tool steps
+that answers the question. Output ONLY one JSON object (no markdown, no commentary).
+
+Required output shape:
+{ "steps": [ { "id": "s1", "tool": "<toolName from registry>", "dependsOn": [], "params": { }, ... } ] }
+
+Planning rules:
+1. Use ONLY toolName values present in toolRegistry (enabled tools).
+...
+```
+
+### User message (`toolRegistry` from `orchestrator_tool`)
+
+The user message is **not** only the question. It includes the full registry as structured JSON (every enabled tool: `toolName`, `version`, `toolType`, `executionMode`, `description`, `requestSchema`, `responseSchema`):
+
+```text
+Create the workflow DAG for the following user question.
+
+userQuestion:
+Should we freeze this $15k withdrawal? User user-demo-001 had a new device yesterday.
+
+toolRegistry (from orchestrator_tool — use only these tools):
+[
+  {
+    "toolName": "ai_decision_rag",
+    "version": "1.0.0",
+    "toolType": "SIMILARITY_RETRIEVAL",
+    "executionMode": "SYNC",
+    "description": "AiDecisionMakingBackend hybrid RAG assess for similar cases.",
+    "requestSchema": { "type": "object", "properties": { "text": { "type": "string" }, "metadata": { "type": "string" } } },
+    "responseSchema": { "type": "object", "properties": { "hits": { "type": "array" }, "aiLabel": { "type": "string" }, "summary": { "type": "string" } } }
+  },
+  {
+    "toolName": "data_acquisition",
+    "version": "1.0.0",
+    "toolType": "DATA_ACQUISITION",
+    "executionMode": "SYNC",
+    "description": "Fetch risk context / features for the current question.",
+    "requestSchema": { "type": "object", "properties": { "scenario": { "type": "string" } } },
+    "responseSchema": { "type": "object", "properties": { "features": { "type": "object" } } }
+  },
+  {
+    "toolName": "human_in_the_loop",
+    "version": "1.0.0",
+    "toolType": "VALIDATION",
+    "executionMode": "ASYNC",
+    "description": "Async user approval: is the proposed solution acceptable?",
+    "requestSchema": { "type": "object", "properties": { "proposal": { "type": "string" }, "prompt": { "type": "string" } } },
+    "responseSchema": { "type": "object", "properties": { "decision": { "type": "string" }, "accepted": { "type": "boolean" } } }
+  },
+  {
+    "toolName": "llm_answer",
+    "version": "1.0.0",
+    "toolType": "LLM_REASONING",
+    "executionMode": "SYNC",
+    "description": "Synthesize final answer from prior workflow step outputs.",
+    "requestSchema": { "type": "object", "properties": {} },
+    "responseSchema": { "type": "object", "properties": { "answer": { "type": "string" } } }
+  },
+  {
+    "toolName": "natural_language_to_sql",
+    ...
+  },
+  {
+    "toolName": "similarity_retrieval",
+    ...
+  }
+]
+```
+
+At runtime the array contains **every** enabled row from `orchestrator_tool` (sorted by `toolName`), populated at startup by `ToolRegistryStartup`.
+
+### Example Azure OpenAI request body
 
 `POST {AZURE_OPENAI_ENDPOINT}/openai/deployments/ai-rag-agentic-ai/chat/completions?api-version=2024-02-01`
 
@@ -55,26 +135,10 @@ Should we freeze this $15k withdrawal? User user-demo-001 had a new device yeste
   "max_tokens": 4096,
   "response_format": { "type": "json_object" },
   "messages": [
-    {
-      "role": "system",
-      "content": "You are a workflow planner for a risk-control agent. Output ONLY valid JSON (no markdown):\n{\"steps\":[{\"id\":\"s1\",\"tool\":\"<tool_name>\",\"dependsOn\":[],\"params\":{},\"maxTimeMs\":30000,\"timeoutMs\":120000}]}\nRules: use only tools from the catalog; no cycles; max 20 steps; last step should use llm_answer when possible.\nUse ai_decision_rag for similar-case search; natural_language_to_sql for analytics questions;\nhuman_in_the_loop before llm_answer when a proposal needs user sign-off (ASYNC — user approves via API)."
-    },
-    {
-      "role": "user",
-      "content": "Question:\nShould we freeze this $15k withdrawal? User user-demo-001 had a new device yesterday.\n\nTool catalog:\n- data_acquisition v1.0.0 [DATA_ACQUISITION, SYNC]: Fetch risk context / features for the current question.\n  requestSchema: {\"type\":\"object\",\"properties\":{\"scenario\":{\"type\":\"string\"}}}\n  responseSchema: {\"type\":\"object\",\"properties\":{\"features\":{\"type\":\"object\"}}}\n- ai_decision_rag v1.0.0 [SIMILARITY_RETRIEVAL, SYNC]: AiDecisionMakingBackend hybrid RAG assess for similar cases.\n  requestSchema: {\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"},\"metadata\":{\"type\":\"string\"}}}\n  responseSchema: {\"type\":\"object\",\"properties\":{\"hits\":{\"type\":\"array\"},\"aiLabel\":{\"type\":\"string\"},\"summary\":{\"type\":\"string\"}}}\n- natural_language_to_sql v1.0.0 [AGGREGATE, SYNC]: Natural language → read-only SQL using schema_catalog descriptions.\n  requestSchema: {\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"},\"maxRows\":{\"type\":\"integer\"}}}\n  responseSchema: {\"type\":\"object\",\"properties\":{\"sql\":{\"type\":\"string\"},\"rows\":{\"type\":\"array\"},\"rowCount\":{\"type\":\"integer\"}}}\n- human_in_the_loop v1.0.0 [VALIDATION, ASYNC]: Async user approval: is the proposed solution acceptable?\n  requestSchema: {\"type\":\"object\",\"properties\":{\"proposal\":{\"type\":\"string\"},\"prompt\":{\"type\":\"string\"}}}\n  responseSchema: {\"type\":\"object\",\"properties\":{\"decision\":{\"type\":\"string\"},\"accepted\":{\"type\":\"boolean\"}}}\n- llm_answer v1.0.0 [LLM_REASONING, SYNC]: Synthesize final answer from prior workflow step outputs.\n  requestSchema: {\"type\":\"object\",\"properties\":{}}\n  responseSchema: {\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}}}\n"
-    }
+    { "role": "system", "content": "<planner system prompt — CREATE workflow DAG + rules>" },
+    { "role": "user", "content": "<Create the workflow DAG… + userQuestion + toolRegistry JSON array>" }
   ]
 }
-```
-
-The **user** message is always:
-
-```text
-Question:
-<user question from POST /agent/ask>
-
-Tool catalog:
-<one line per row in orchestrator_tool: name, type, mode, description, request/response JSON schemas>
 ```
 
 ### Example LLM response (assistant `content`)
