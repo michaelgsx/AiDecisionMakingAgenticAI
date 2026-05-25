@@ -61,12 +61,17 @@ Required output shape:
 
 Planning rules:
 1. Use ONLY toolName values present in toolRegistry (enabled tools).
-...
+2. Every step.id must be unique; dependsOn must be acyclic.
+3. params must match requestSchema — read each property's description for values and branching.
+4. Use responseSchema property descriptions (e.g. aiLabel, accepted, rowCount) for later steps / conditional paths.
+5. Last step should be llm_answer when possible; max 20 steps.
 ```
 
 ### User message (`toolRegistry` from `orchestrator_tool`)
 
-The user message is **not** only the question. It includes the full registry as structured JSON (every enabled tool: `toolName`, `version`, `toolType`, `executionMode`, `description`, `requestSchema`, `responseSchema`):
+The user message includes **`userQuestion`** plus **`toolRegistry`**: a JSON array of all enabled tools. Each tool's `requestSchema` and `responseSchema` are JSON Schema objects where **every property has a `description`** (stored in `orchestrator_tool`, sourced from `ToolJsonSchemas.java` at startup). The planner uses those descriptions to fill `params` and to reason about if/else (e.g. branch on `aiLabel` or `accepted`).
+
+At runtime the array has **all 6 tools** (sorted by `toolName`). Below: two full entries as sent to the LLM; the other four follow the same pattern (`data_acquisition`, `similarity_retrieval`, `natural_language_to_sql`, `llm_answer`).
 
 ```text
 Create the workflow DAG for the following user question.
@@ -75,55 +80,115 @@ userQuestion:
 Should we freeze this $15k withdrawal? User user-demo-001 had a new device yesterday.
 
 toolRegistry (from orchestrator_tool — use only these tools):
-[
-  {
-    "toolName": "ai_decision_rag",
-    "version": "1.0.0",
-    "toolType": "SIMILARITY_RETRIEVAL",
-    "executionMode": "SYNC",
-    "description": "AiDecisionMakingBackend hybrid RAG assess for similar cases.",
-    "requestSchema": { "type": "object", "properties": { "text": { "type": "string" }, "metadata": { "type": "string" } } },
-    "responseSchema": { "type": "object", "properties": { "hits": { "type": "array" }, "aiLabel": { "type": "string" }, "summary": { "type": "string" } } }
-  },
-  {
-    "toolName": "data_acquisition",
-    "version": "1.0.0",
-    "toolType": "DATA_ACQUISITION",
-    "executionMode": "SYNC",
-    "description": "Fetch risk context / features for the current question.",
-    "requestSchema": { "type": "object", "properties": { "scenario": { "type": "string" } } },
-    "responseSchema": { "type": "object", "properties": { "features": { "type": "object" } } }
-  },
-  {
-    "toolName": "human_in_the_loop",
-    "version": "1.0.0",
-    "toolType": "VALIDATION",
-    "executionMode": "ASYNC",
-    "description": "Async user approval: is the proposed solution acceptable?",
-    "requestSchema": { "type": "object", "properties": { "proposal": { "type": "string" }, "prompt": { "type": "string" } } },
-    "responseSchema": { "type": "object", "properties": { "decision": { "type": "string" }, "accepted": { "type": "boolean" } } }
-  },
-  {
-    "toolName": "llm_answer",
-    "version": "1.0.0",
-    "toolType": "LLM_REASONING",
-    "executionMode": "SYNC",
-    "description": "Synthesize final answer from prior workflow step outputs.",
-    "requestSchema": { "type": "object", "properties": {} },
-    "responseSchema": { "type": "object", "properties": { "answer": { "type": "string" } } }
-  },
-  {
-    "toolName": "natural_language_to_sql",
-    ...
-  },
-  {
-    "toolName": "similarity_retrieval",
-    ...
-  }
-]
 ```
 
-At runtime the array contains **every** enabled row from `orchestrator_tool` (sorted by `toolName`), populated at startup by `ToolRegistryStartup`.
+**Example registry entry — `ai_decision_rag` (every request/response field documented):**
+
+```json
+{
+  "toolName": "ai_decision_rag",
+  "version": "1.1.0",
+  "toolType": "SIMILARITY_RETRIEVAL",
+  "executionMode": "SYNC",
+  "description": "AiDecisionMakingBackend hybrid RAG assess for similar cases.",
+  "requestSchema": {
+    "type": "object",
+    "description": "Similar-case search inputs (legacy tool; same as ai_decision_rag).",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Natural-language case text to find similar historical cases. Alias for text."
+      },
+      "text": {
+        "type": "string",
+        "description": "Case notes / question text sent to RAG assess."
+      },
+      "metadata": {
+        "type": "string",
+        "description": "JSON string of case metadata (user_id, scenario, transaction_id) for hybrid search."
+      }
+    }
+  },
+  "responseSchema": {
+    "type": "object",
+    "description": "AiDecision RAG assess result; use aiLabel and hits for branching.",
+    "properties": {
+      "query": { "type": "string", "description": "Echo of the search text." },
+      "risk": { "type": "string", "description": "Coarse risk level from search (e.g. high, medium, low)." },
+      "searchReason": { "type": "string", "description": "Short Azure AI Search summary (not full LLM write-up)." },
+      "aiLabel": {
+        "type": "string",
+        "description": "Model recommendation: passed | rejected | frozen. Use for if/else before human_in_the_loop."
+      },
+      "aiReason": { "type": "string", "description": "Full analyst-style explanation from LLM when configured." },
+      "hits": {
+        "type": "array",
+        "description": "Similar records: recordId, score, snippet, reviewOutcome, scenario."
+      },
+      "summary": { "type": "string", "description": "One-line tool summary for logs." },
+      "source": { "type": "string", "description": "AiDecisionMakingBackend or demo." }
+    }
+  }
+}
+```
+
+**Example registry entry — `human_in_the_loop` (branch on `accepted` in responseSchema):**
+
+```json
+{
+  "toolName": "human_in_the_loop",
+  "version": "1.1.0",
+  "toolType": "VALIDATION",
+  "executionMode": "ASYNC",
+  "description": "Async user approval: is the proposed solution acceptable?",
+  "requestSchema": {
+    "type": "object",
+    "description": "Async human approval before final answer.",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Question shown to the reviewer in the QA UI (e.g. Is this freeze acceptable?)."
+      },
+      "proposal": {
+        "type": "string",
+        "description": "Full proposed action text; defaults to concatenated prior step outputs if omitted."
+      }
+    }
+  },
+  "responseSchema": {
+    "type": "object",
+    "description": "After user responds via POST /agent/runs/{runId}/human-response.",
+    "properties": {
+      "requestId": { "type": "string", "description": "UUID for the human request row." },
+      "stepKey": { "type": "string", "description": "Workflow step id this approval belongs to." },
+      "prompt": { "type": "string", "description": "Prompt shown to the user." },
+      "proposal": { "type": "string", "description": "Proposal text that was reviewed." },
+      "status": { "type": "string", "description": "WAITING until answered, then ANSWERED." },
+      "decision": {
+        "type": "string",
+        "description": "accept | reject after user responds. Use for branching to llm_answer tone."
+      },
+      "accepted": {
+        "type": "boolean",
+        "description": "true if decision=accept; false if reject. Primary branch flag."
+      },
+      "comment": { "type": "string", "description": "Optional reviewer comment." },
+      "summary": { "type": "string", "description": "Short outcome summary." }
+    }
+  }
+}
+```
+
+**Other tools in the same array (each property also has `description`):**
+
+| toolName | requestSchema highlights | responseSchema highlights (for branching) |
+|----------|--------------------------|----------------------------------------|
+| `data_acquisition` | `scenario` — risk use-case id | `features`, `note` |
+| `similarity_retrieval` | same as `ai_decision_rag` | same as `ai_decision_rag` |
+| `natural_language_to_sql` | `question`, `maxRows` | `rowCount` — 0 vs non-empty |
+| `llm_answer` | (empty object) | `answer` — final text |
+
+Canonical definitions: `backend/src/main/java/com/aidecision/agentic/tool/ToolJsonSchemas.java`. Inspect live registry: `GET /agent/tools/ai_decision_rag/registry-info`.
 
 ### Example Azure OpenAI request body
 
@@ -362,6 +427,8 @@ python run_migrations.py
 | V6 | Upsert orchestrator tools |
 | V7 | `qa_evaluation` (post-run human review) |
 | V8 | Full catalog descriptions + demo Q&A / risk / evaluation rows |
+| V9 | Fix demo UUIDs + missing tools |
+| V11 | Human request `EXPIRED` status (tool cancel API) |
 | V9 | Fix demo UUIDs + missing tools |
 
 ### NL2SQL schema catalog
