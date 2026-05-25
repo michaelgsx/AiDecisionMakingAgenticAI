@@ -6,6 +6,20 @@ Companion UI: **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisi
 
 > **Synthetic data:** Schema catalog text, seed risk rows, and demo evaluations are AI-generated for development only.
 
+## Screenshots (companion UI)
+
+The **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisionMakingQAFront)** app consumes this API.
+
+### Chat tab
+
+![Chat tab — orchestrator Q&A UI](docs/screenshots/chat-tab.png)
+
+### Evaluation tab
+
+Post-run human review (`GET /agent/evaluations`, `POST .../review`).
+
+![Evaluation tab — accept / reject queue](docs/screenshots/evaluation-tab.png)
+
 ## What it does
 
 1. **Accept** a natural-language question (`POST /agent/ask`).
@@ -30,6 +44,10 @@ Companion UI: **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisi
 ```
 
 Deep dive: [`.ai/12-orchestrator-architecture.md`](./.ai/12-orchestrator-architecture.md)
+
+## Tool registration at startup
+
+On each application start, `ToolRegistryStartup` inserts built-in tools into `orchestrator_tool` **only when the tool name is not already present** (existing rows are left unchanged). Runtime executors are Spring beans implementing `AgentTool`; metadata lives in `BuiltinToolCatalog`.
 
 ## Registered tools
 

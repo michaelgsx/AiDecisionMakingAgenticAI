@@ -5,7 +5,7 @@
 | Layer | Responsibility |
 |-------|----------------|
 | **Orchestrator** | Accept questions, plan DAG, persist workflow, poll status, resume failed runs |
-| **Tool registry** | Portal of tools (name, version, schemas, SYNC/ASYNC, type) |
+| **Tool registry** | Portal of tools (name, version, schemas, SYNC/ASYNC, type). Built-ins auto-inserted at startup if missing |
 | **Workflow planner** | LLM builds execution DAG from question + tool catalog |
 | **DAG validator** | No cycles (dead loops), known tools, max step count |
 | **Executor** | Runs READY steps when dependencies are COMPLETED |

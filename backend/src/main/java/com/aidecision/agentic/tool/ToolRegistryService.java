@@ -2,7 +2,6 @@ package com.aidecision.agentic.tool;
 
 import com.aidecision.agentic.entity.OrchestratorTool;
 import com.aidecision.agentic.repository.OrchestratorToolRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,85 +21,61 @@ public class ToolRegistryService {
 
     private final OrchestratorToolRepository toolRepo;
     private final List<AgentTool> agentTools;
-    private final ObjectMapper mapper;
 
     private Map<String, AgentTool> executorsByName = Map.of();
 
-    public ToolRegistryService(
-            OrchestratorToolRepository toolRepo,
-            List<AgentTool> agentTools,
-            ObjectMapper mapper) {
+    public ToolRegistryService(OrchestratorToolRepository toolRepo, List<AgentTool> agentTools) {
         this.toolRepo = toolRepo;
         this.agentTools = agentTools;
-        this.mapper = mapper;
     }
 
     @PostConstruct
     void initExecutors() {
         executorsByName = agentTools.stream()
                 .collect(Collectors.toMap(AgentTool::name, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+        log.info("Loaded {} runtime tool executor(s): {}", executorsByName.size(), executorsByName.keySet());
     }
 
+    /**
+     * Called once at startup. Inserts rows into {@code orchestrator_tool} for each built-in tool
+     * that has a runtime executor; skips tools already present in the table.
+     */
     @Transactional
-    public void seedDefaultsIfEmpty() {
-        if (toolRepo.count() > 0) {
-            ensureBuiltinTools();
-            return;
+    public void registerBuiltinToolsOnStartup() {
+        int inserted = 0;
+        int skipped = 0;
+        for (BuiltinToolCatalog.Definition def : BuiltinToolCatalog.all()) {
+            if (insertToolIfAbsent(def)) {
+                inserted++;
+            } else {
+                skipped++;
+            }
         }
-        log.info("Seeding orchestrator tool registry");
-        seedAllBuiltinTools();
+        log.info("Orchestrator tool registry: {} inserted, {} already existed", inserted, skipped);
     }
 
-    /** Upsert built-in tools so new deploys pick up ai_decision_rag, NL2SQL, human_in_the_loop. */
-    @Transactional
-    public void ensureBuiltinTools() {
-        seedAllBuiltinTools();
-    }
+    private boolean insertToolIfAbsent(BuiltinToolCatalog.Definition def) {
+        if (toolRepo.existsById(def.name())) {
+            log.debug("Tool already registered, skipping: {}", def.name());
+            return false;
+        }
+        if (!executorsByName.containsKey(def.name())) {
+            log.warn("No runtime executor for tool {}, skipping DB registration", def.name());
+            return false;
+        }
 
-    private void seedAllBuiltinTools() {
-        upsertTool("data_acquisition", "1.0.0", "Fetch risk context / features",
-                "DATA_ACQUISITION", "SYNC",
-                "{\"type\":\"object\",\"properties\":{\"scenario\":{\"type\":\"string\"}}}",
-                "{\"type\":\"object\",\"properties\":{\"features\":{\"type\":\"object\"}}}");
-        upsertTool("similarity_retrieval", "1.0.0",
-                "Legacy alias — delegates to ai_decision_rag (/rag/assess).",
-                "SIMILARITY_RETRIEVAL", "SYNC",
-                "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}}}",
-                "{\"type\":\"object\",\"properties\":{\"hits\":{\"type\":\"array\"},\"summary\":{\"type\":\"string\"}}}");
-        upsertTool("ai_decision_rag", "1.0.0",
-                "AiDecisionMakingBackend hybrid RAG assess for similar cases.",
-                "SIMILARITY_RETRIEVAL", "SYNC",
-                "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"},\"metadata\":{\"type\":\"string\"}}}",
-                "{\"type\":\"object\",\"properties\":{\"hits\":{\"type\":\"array\"},\"aiLabel\":{\"type\":\"string\"},\"summary\":{\"type\":\"string\"}}}");
-        upsertTool("natural_language_to_sql", "1.0.0",
-                "NL question → read-only SQL using schema_catalog descriptions.",
-                "AGGREGATE", "SYNC",
-                "{\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"},\"maxRows\":{\"type\":\"integer\"}}}",
-                "{\"type\":\"object\",\"properties\":{\"sql\":{\"type\":\"string\"},\"rows\":{\"type\":\"array\"},\"rowCount\":{\"type\":\"integer\"}}}");
-        upsertTool("human_in_the_loop", "1.0.0",
-                "Async user approval: is the proposed solution acceptable?",
-                "VALIDATION", "ASYNC",
-                "{\"type\":\"object\",\"properties\":{\"proposal\":{\"type\":\"string\"},\"prompt\":{\"type\":\"string\"}}}",
-                "{\"type\":\"object\",\"properties\":{\"decision\":{\"type\":\"string\"},\"accepted\":{\"type\":\"boolean\"}}}");
-        upsertTool("llm_answer", "1.0.0", "Synthesize final answer from prior steps",
-                "LLM_REASONING", "SYNC",
-                "{\"type\":\"object\",\"properties\":{}}",
-                "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}}}");
-    }
-
-    private void upsertTool(
-            String name, String version, String description, String type, String mode,
-            String requestSchema, String responseSchema) {
-        OrchestratorTool t = toolRepo.findById(name).orElseGet(OrchestratorTool::new);
-        t.setToolName(name);
-        t.setVersion(version);
-        t.setDescription(description);
-        t.setToolType(type);
-        t.setExecutionMode(mode);
-        t.setRequestSchemaJson(requestSchema);
-        t.setResponseSchemaJson(responseSchema);
-        t.setEnabled(true);
-        toolRepo.save(t);
+        OrchestratorTool row = new OrchestratorTool();
+        row.setToolName(def.name());
+        row.setVersion(def.version());
+        row.setDescription(def.description());
+        row.setToolType(def.toolType());
+        row.setExecutionMode(def.executionMode());
+        row.setRequestSchemaJson(def.requestSchemaJson());
+        row.setResponseSchemaJson(def.responseSchemaJson());
+        row.setEnabled(true);
+        toolRepo.save(row);
+        log.info("Registered orchestrator tool: {} ({}, {})", def.name(), def.toolType(), def.executionMode());
+        return true;
     }
 
     public List<OrchestratorTool> listEnabledTools() {
@@ -124,6 +99,9 @@ public class ToolRegistryService {
     public OrchestratorTool register(OrchestratorTool tool) {
         if (!executorsByName.containsKey(tool.getToolName())) {
             throw new IllegalArgumentException("Cannot register tool without runtime executor: " + tool.getToolName());
+        }
+        if (toolRepo.existsById(tool.getToolName())) {
+            throw new IllegalArgumentException("Tool already exists: " + tool.getToolName());
         }
         return toolRepo.save(tool);
     }

@@ -24,7 +24,6 @@ public class ToolRegistryController {
 
     @GetMapping
     public List<ToolPortalDto> listTools() {
-        registry.seedDefaultsIfEmpty();
         return registry.listEnabledTools().stream().map(this::toDto).toList();
     }
 
