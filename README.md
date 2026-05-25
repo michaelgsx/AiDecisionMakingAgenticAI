@@ -6,19 +6,7 @@ Companion UI: **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisi
 
 > **Synthetic data:** Schema catalog text, seed risk rows, and demo evaluations are AI-generated for development only.
 
-## Screenshots (companion UI)
-
-The **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisionMakingQAFront)** app consumes this API.
-
-### Chat tab
-
-![Chat tab — orchestrator Q&A UI](docs/screenshots/chat-tab.png)
-
-### Evaluation tab
-
-Post-run human review (`GET /agent/evaluations`, `POST .../review`).
-
-![Evaluation tab — accept / reject queue](docs/screenshots/evaluation-tab.png)
+UI screenshots live in **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisionMakingQAFront)** README (Chat and Evaluation tabs).
 
 ## What it does
 
