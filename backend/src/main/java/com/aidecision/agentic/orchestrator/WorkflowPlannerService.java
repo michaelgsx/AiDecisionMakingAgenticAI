@@ -163,14 +163,15 @@ public class WorkflowPlannerService {
                 1. Use ONLY toolName values present in toolRegistry (enabled tools).
                 2. Every step.id must be unique (e.g. s1, s2, s3).
                 3. dependsOn lists step ids that must finish before this step; no cycles.
-                4. params must match that tool's requestSchema (fill literals from the user question where needed).
-                5. At most %d steps. The LAST step should be llm_answer when possible.
-                6. Similar-case / policy questions: include ai_decision_rag (or similarity_retrieval).
-                7. Counts, aggregates, SQL analytics: include natural_language_to_sql before llm_answer.
-                8. When a human must approve a recommendation before the final answer: insert human_in_the_loop \
+                4. params must match that tool's requestSchema; read each property's description to choose values and branching.
+                5. Use responseSchema property descriptions (e.g. aiLabel, accepted, rowCount) to decide later steps / conditional paths.
+                6. At most %d steps. The LAST step should be llm_answer when possible.
+                7. Similar-case / policy questions: include ai_decision_rag (or similarity_retrieval).
+                8. Counts, aggregates, SQL analytics: include natural_language_to_sql before llm_answer.
+                9. When a human must approve a recommendation before the final answer: insert human_in_the_loop \
                    (ASYNC) before llm_answer; downstream steps depend on it.
-                9. ASYNC tools stay RUNNING until the user responds via API — give them longer timeoutMs if needed.
-                10. data_acquisition is optional context at the start when features/scenario help later tools.
+                10. ASYNC tools stay RUNNING until the user responds via API — give them longer timeoutMs if needed.
+                11. data_acquisition is optional context at the start when features/scenario help later tools.
                 """
                 .formatted(defaultMax, defaultTimeout, maxSteps);
     }

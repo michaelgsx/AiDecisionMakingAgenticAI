@@ -37,33 +37,52 @@ public class ToolRegistryService {
     }
 
     /**
-     * Called once at startup. Inserts rows into {@code orchestrator_tool} for each built-in tool
-     * that has a runtime executor; skips tools already present in the table.
+     * At startup: insert missing built-in tools; always refresh description and schemas from
+     * {@link BuiltinToolCatalog} so every parameter has descriptions for the workflow planner.
      */
     @Transactional
     public void registerBuiltinToolsOnStartup() {
         int inserted = 0;
+        int updated = 0;
         int skipped = 0;
         for (BuiltinToolCatalog.Definition def : BuiltinToolCatalog.all()) {
-            if (insertToolIfAbsent(def)) {
-                inserted++;
-            } else {
+            if (!executorsByName.containsKey(def.name())) {
+                log.warn("No runtime executor for tool {}, skipping DB registration", def.name());
                 skipped++;
+                continue;
+            }
+            if (toolRepo.existsById(def.name())) {
+                syncCatalogMetadata(def);
+                updated++;
+            } else if (insertTool(def)) {
+                inserted++;
             }
         }
-        log.info("Orchestrator tool registry: {} inserted, {} already existed", inserted, skipped);
+        log.info("Orchestrator tool registry: {} inserted, {} schemas synced, {} skipped (no executor)",
+                inserted, updated, skipped);
     }
 
-    private boolean insertToolIfAbsent(BuiltinToolCatalog.Definition def) {
-        if (toolRepo.existsById(def.name())) {
-            log.debug("Tool already registered, skipping: {}", def.name());
-            return false;
-        }
-        if (!executorsByName.containsKey(def.name())) {
-            log.warn("No runtime executor for tool {}, skipping DB registration", def.name());
-            return false;
-        }
+    private boolean insertTool(BuiltinToolCatalog.Definition def) {
+        OrchestratorTool row = toEntity(def);
+        toolRepo.save(row);
+        log.info("Registered orchestrator tool: {} ({}, {})", def.name(), def.toolType(), def.executionMode());
+        return true;
+    }
 
+    private void syncCatalogMetadata(BuiltinToolCatalog.Definition def) {
+        OrchestratorTool row = toolRepo.findById(def.name()).orElseThrow();
+        row.setVersion(def.version());
+        row.setDescription(def.description());
+        row.setToolType(def.toolType());
+        row.setExecutionMode(def.executionMode());
+        row.setRequestSchemaJson(def.requestSchemaJson());
+        row.setResponseSchemaJson(def.responseSchemaJson());
+        row.setEnabled(true);
+        toolRepo.save(row);
+        log.debug("Synced tool schemas/descriptions: {}", def.name());
+    }
+
+    private static OrchestratorTool toEntity(BuiltinToolCatalog.Definition def) {
         OrchestratorTool row = new OrchestratorTool();
         row.setToolName(def.name());
         row.setVersion(def.version());
@@ -73,9 +92,7 @@ public class ToolRegistryService {
         row.setRequestSchemaJson(def.requestSchemaJson());
         row.setResponseSchemaJson(def.responseSchemaJson());
         row.setEnabled(true);
-        toolRepo.save(row);
-        log.info("Registered orchestrator tool: {} ({}, {})", def.name(), def.toolType(), def.executionMode());
-        return true;
+        return row;
     }
 
     public List<OrchestratorTool> listEnabledTools() {

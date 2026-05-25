@@ -252,7 +252,12 @@ If chat is not configured or planning fails validation, a fixed default DAG is u
 
 ## Tool registration at startup
 
-On each application start, `ToolRegistryStartup` inserts built-in tools into `orchestrator_tool` **only when the tool name is not already present** (existing rows are left unchanged). Runtime executors are Spring beans implementing `AgentTool`; metadata lives in `BuiltinToolCatalog`.
+On each application start, `ToolRegistryStartup` syncs `BuiltinToolCatalog` into `orchestrator_tool`:
+
+- **New tool** → insert row.
+- **Existing tool** → update `description`, `request_schema_json`, and `response_schema_json` (every property in those schemas has a **`description`** field so the workflow planner can branch on `aiLabel`, `accepted`, `rowCount`, etc.).
+
+Source: `ToolJsonSchemas.java` + `BuiltinToolCatalog.java`. Runtime executors are Spring `AgentTool` beans.
 
 ## Registered tools
 
