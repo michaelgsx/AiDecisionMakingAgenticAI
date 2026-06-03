@@ -16,6 +16,7 @@ class WorkflowPlannerServiceParseTest {
         planner = new WorkflowPlannerService(
                 null, null, null, null,
                 new WorkflowPlannerPromptBuilder(new com.aidecision.agentic.config.OrchestratorProperties(), new ObjectMapper()),
+                null,
                 new ObjectMapper(),
                 null);
     }

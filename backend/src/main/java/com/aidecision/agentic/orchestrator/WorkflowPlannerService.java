@@ -3,6 +3,8 @@ package com.aidecision.agentic.orchestrator;
 import com.aidecision.agentic.config.AzureOpenAiProperties;
 import com.aidecision.agentic.config.OrchestratorProperties;
 import com.aidecision.agentic.entity.OrchestratorTool;
+import com.aidecision.agentic.entity.PlannerWorkflowCache;
+import com.aidecision.agentic.service.PlannerWorkflowCacheService;
 import com.aidecision.agentic.tool.ToolRegistryService;
 import com.aidecision.agentic.util.LogSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,6 +21,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 public class WorkflowPlannerService {
@@ -30,6 +33,7 @@ public class WorkflowPlannerService {
     private final ToolRegistryService toolRegistry;
     private final WorkflowDagValidator validator;
     private final WorkflowPlannerPromptBuilder promptBuilder;
+    private final PlannerWorkflowCacheService workflowCache;
     private final ObjectMapper mapper;
     private final RestClient http;
 
@@ -39,6 +43,7 @@ public class WorkflowPlannerService {
             ToolRegistryService toolRegistry,
             WorkflowDagValidator validator,
             WorkflowPlannerPromptBuilder promptBuilder,
+            PlannerWorkflowCacheService workflowCache,
             ObjectMapper mapper,
             RestClient http) {
         this.openAi = openAi;
@@ -46,6 +51,7 @@ public class WorkflowPlannerService {
         this.toolRegistry = toolRegistry;
         this.validator = validator;
         this.promptBuilder = promptBuilder;
+        this.workflowCache = workflowCache;
         this.mapper = mapper;
         this.http = http;
     }
@@ -105,8 +111,15 @@ public class WorkflowPlannerService {
 
     private PlannerWorkflowResponse callPlannerLlm(String question, Map<String, OrchestratorTool> tools)
             throws Exception {
+        Optional<PlannerWorkflowCache> cached = workflowCache.findByQuestion(question);
+        if (cached.isPresent()) {
+            log.info("Using cached planner workflow question={}", LogSanitizer.question(question));
+            return parseResponse(cached.get().getWorkflowJson());
+        }
+
         PlannerPrompt prompt = promptBuilder.build(question, tools);
         String raw = invokeChat(prompt.systemPrompt(), prompt.userPrompt());
+        workflowCache.save(question, prompt, raw);
         return parseResponse(raw);
     }
 
