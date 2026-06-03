@@ -72,7 +72,7 @@ jobs:
           echo "Artifact: $JAR ($(wc -c < "$JAR") bytes)"
           unzip -t "$JAR"
           jar tf "$JAR" | grep -q 'BOOT-INF/classes/com/aidecision/agentic/AgenticApplication.class'
-          echo "path=$JAR" >> "$GITHUB_OUTPUT"
+          echo "path=$(basename "$JAR")" >> "$GITHUB_OUTPUT"
 
       - name: Azure login (service principal)
         uses: azure/login@v2
