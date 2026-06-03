@@ -565,7 +565,9 @@ cd backend
 
 ## Azure deploy
 
-Workflow: `.github/workflows/deploy-agentic-appservice.yml` (branch **`main`**).
+**Use GitHub Actions only** — `.github/workflows/deploy-agentic-appservice.yml` on push to **`v1`** or **`main`**, or **Actions → Run workflow**.
+
+Do not deploy with local `az webapp deploy` (risk of corrupt JAR / failed startup).
 
 | Resource | Name |
 |----------|------|
@@ -587,9 +589,9 @@ Workflow: `.github/workflows/deploy-agentic-appservice.yml` (branch **`main`**).
 | `APP_RAG_API_BASE_URL` | AiDecisionMakingBackend URL |
 | `CORS_ORIGINS` | `https://<swa-host>.azurestaticapps.net`, `http://localhost:5174` |
 | `OPS_TOKEN` | Match QA `VITE_OPS_TOKEN` |
-| `WEBSITES_PORT` | `8788` |
+| `WEBSITES_PORT` | `80` (set by deploy workflow; Azure Java SE uses `-Dserver.port=80`) |
 
-Runtime: **Java 17** (Linux).
+Runtime: **Java 17** (Linux). Local dev uses port **8788**; Azure uses **80**.
 
 ## Repo layout
 

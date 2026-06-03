@@ -8,11 +8,15 @@
 #     JSON: { "clientId", "clientSecret", "tenantId", "subscriptionId" }
 #     SP needs Website Contributor on ai-rag-agentic-ai (same as ai-rag-webapp).
 #
+# Deploy ONLY via this workflow (push to v1/main or workflow_dispatch).
+# Do not use local `az webapp deploy` — corrupted partial uploads have caused startup failures.
+#
 # App Service → Configuration (Portal; not in git):
 #   SPRING_DATASOURCE_* / AZURE_SQL_*
 #   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_CHAT_DEPLOYMENT=ai-rag-agentic-ai
 #   APP_RAG_API_BASE_URL=https://<ai-rag-webapp>.azurewebsites.net
 #   CORS_ORIGINS=https://yellow-island-0fefe051e.7.azurestaticapps.net,http://localhost:5174
+#   WEBSITES_PORT=80 (Azure Java SE sets -Dserver.port=80; workflow enforces this after deploy)
 
 name: Deploy Agentic API (ai-rag-agentic-ai)
 
@@ -81,6 +85,39 @@ jobs:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           resource-group-name: ${{ env.AZURE_RESOURCE_GROUP }}
           package: backend/target/*.jar
+
+      - name: Ensure App Service listens on port 80
+        run: |
+          set -euo pipefail
+          az webapp config appsettings set \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --settings WEBSITES_PORT=80 \
+            --output none
+          az webapp restart \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}"
+
+      - name: Smoke test /health
+        run: |
+          set -euo pipefail
+          HOST=$(az webapp show \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --query defaultHostName -o tsv)
+          URL="https://${HOST}/health"
+          echo "Waiting for ${URL} (App Service cold start can take several minutes)..."
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 15 "$URL" >/dev/null 2>&1; then
+              echo "Health OK after ${i} attempt(s)"
+              curl -fsS "$URL"
+              exit 0
+            fi
+            echo "Attempt ${i}/60 — not ready yet, sleeping 30s..."
+            sleep 30
+          done
+          echo "Health check failed after 30 minutes" >&2
+          exit 1
 
       - name: Azure logout
         if: always()
