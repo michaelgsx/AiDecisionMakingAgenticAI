@@ -9,7 +9,8 @@
 #     SP needs Website Contributor on ai-rag-agentic-ai (same as ai-rag-webapp).
 #
 # Deploy ONLY via this workflow (push to v1/main or workflow_dispatch).
-# Do not use local `az webapp deploy` — corrupted partial uploads have caused startup failures.
+# Do not use local `az webapp deploy` — corrupted partial uploads cause startup failures
+# (ClassNotFoundException + EOFException on AgenticApplication = truncated app.jar).
 #
 # App Service → Configuration (Portal; not in git):
 #   SPRING_DATASOURCE_* / AZURE_SQL_*
@@ -40,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-ai-rag-agentic-ai
-      cancel-in-progress: true
+      cancel-in-progress: false
     permissions:
       contents: read
 
@@ -57,6 +58,21 @@ jobs:
       - name: Build with Maven
         working-directory: backend
         run: ./mvnw clean package -DskipTests -B
+
+      - name: Verify deploy JAR integrity
+        id: jar
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          JAR=$(ls -1 target/*.jar | grep -v '\.original$' | head -1)
+          if [ -z "$JAR" ]; then
+            echo "No executable JAR found under backend/target" >&2
+            exit 1
+          fi
+          echo "Artifact: $JAR ($(wc -c < "$JAR") bytes)"
+          unzip -t "$JAR"
+          jar tf "$JAR" | grep -q 'BOOT-INF/classes/com/aidecision/agentic/AgenticApplication.class'
+          echo "path=$JAR" >> "$GITHUB_OUTPUT"
 
       - name: Azure login (service principal)
         uses: azure/login@v2
@@ -132,14 +148,15 @@ jobs:
             echo "Lock cleared after restart."
             exit 0
           fi
-          echo "Deployment lock still present after restart; continuing anyway." >&2
+          echo "Deployment lock still present after restart; aborting to avoid corrupt JAR upload." >&2
+          exit 1
 
       - name: Deploy JAR to Azure App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           resource-group-name: ${{ env.AZURE_RESOURCE_GROUP }}
-          package: backend/target/*.jar
+          package: backend/target/${{ steps.jar.outputs.path }}
 
       - name: Ensure WEBSITES_PORT is 80 (no restart — OneDeploy already restarted)
         run: |
@@ -168,16 +185,16 @@ jobs:
             --query defaultHostName -o tsv)
           URL="https://${HOST}/health"
           echo "Waiting for ${URL} (App Service cold start can take several minutes)..."
-          for i in $(seq 1 20); do
+          for i in $(seq 1 30); do
             if curl -fsS --max-time 15 "$URL" >/dev/null 2>&1; then
               echo "Health OK after ${i} attempt(s)"
               curl -fsS "$URL"
               exit 0
             fi
-            echo "Attempt ${i}/20 — not ready yet, sleeping 15s..."
+            echo "Attempt ${i}/30 — not ready yet, sleeping 15s..."
             sleep 15
           done
-          echo "Health check failed after 5 minutes" >&2
+          echo "Health check failed after 7.5 minutes" >&2
           exit 1
 
       - name: Azure logout
