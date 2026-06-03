@@ -1,6 +1,6 @@
 # AI Decision Making — Agentic AI (Backend)
 
-Spring Boot **orchestrator + tool registry** API for risk-control Q&A. Deployed to App Service **`ai-rag-agentic-ai`**. Azure OpenAI chat deployment **`ai-rag-agentic-ai`** on resource **`ai-reg-embedding`**.
+Spring Boot **orchestrator + tool registry** API for risk-control Q&A. Deployed to App Service **`ai-rag-agentic-ai`**. Azure OpenAI chat deployment **`gpt-5.4-mini`** on resource **`ai-reg-embedding`** (same as `ai-rag-webapp`).
 
 Companion UI: **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisionMakingQAFront)** (SWA **`ai-rag-agentic-qa`**).
 
@@ -192,7 +192,7 @@ Canonical definitions: `backend/src/main/java/com/aidecision/agentic/tool/ToolJs
 
 ### Example Azure OpenAI request body
 
-`POST {AZURE_OPENAI_ENDPOINT}/openai/deployments/ai-rag-agentic-ai/chat/completions?api-version=2024-02-01`
+`POST {AZURE_OPENAI_ENDPOINT}/openai/deployments/gpt-5.4-mini/chat/completions?api-version=2024-02-01`
 
 ```json
 {
@@ -572,7 +572,7 @@ Do not deploy with local `az webapp deploy` (risk of corrupt JAR / failed startu
 | Resource | Name |
 |----------|------|
 | App Service | **ai-rag-agentic-ai** |
-| OpenAI deployment | **ai-rag-agentic-ai** |
+| OpenAI deployment | **gpt-5.4-mini** |
 | SQL database | **ai-rag-db-1** |
 | QA Static Web App | **ai-rag-agentic-qa** (other repo) |
 
@@ -584,7 +584,7 @@ Do not deploy with local `az webapp deploy` (risk of corrupt JAR / failed startu
 |---------|--------|
 | `AZURE_OPENAI_ENDPOINT` | e.g. `https://ai-reg-embedding.openai.azure.com` |
 | `AZURE_OPENAI_API_KEY` | Key Vault reference recommended |
-| `AZURE_OPENAI_CHAT_DEPLOYMENT` | `ai-rag-agentic-ai` |
+| `AZURE_OPENAI_CHAT_DEPLOYMENT` | `gpt-5.4-mini` |
 | `AZURE_SQL_*` | Server, database, user, password |
 | `APP_RAG_API_BASE_URL` | AiDecisionMakingBackend URL |
 | `CORS_ORIGINS` | `https://<swa-host>.azurestaticapps.net`, `http://localhost:5174` |

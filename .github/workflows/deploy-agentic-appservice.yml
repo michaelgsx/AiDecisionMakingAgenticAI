@@ -14,7 +14,7 @@
 #
 # App Service → Configuration (Portal; not in git):
 #   SPRING_DATASOURCE_* / AZURE_SQL_*
-#   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_CHAT_DEPLOYMENT=ai-rag-agentic-ai
+#   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-5.4-mini
 #   APP_RAG_API_BASE_URL=https://<ai-rag-webapp>.azurewebsites.net
 #   CORS_ORIGINS=https://yellow-island-0fefe051e.7.azurestaticapps.net,http://localhost:5174
 #   WEBSITES_PORT=80 (Azure Java SE sets -Dserver.port=80; set once in Portal — workflow only verifies idempotently)

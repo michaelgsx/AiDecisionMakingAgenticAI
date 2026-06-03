@@ -32,7 +32,7 @@ app:
   azure-openai:
     endpoint: ${AZURE_OPENAI_ENDPOINT:}
     api-key: ${AZURE_OPENAI_API_KEY:}
-    chat-deployment: ${AZURE_OPENAI_CHAT_DEPLOYMENT:ai-rag-agentic-ai}
+    chat-deployment: ${AZURE_OPENAI_CHAT_DEPLOYMENT:gpt-5.4-mini}
     chat-api-version: ${AZURE_OPENAI_CHAT_API_VERSION:}
     api-version: ${AZURE_OPENAI_API_VERSION:2024-02-01}
     skip-chat: ${AZURE_OPENAI_SKIP_CHAT:false}
