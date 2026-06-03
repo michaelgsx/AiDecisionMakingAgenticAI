@@ -7,6 +7,8 @@ import com.aidecision.agentic.entity.AsyncChatStatus;
 import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.orchestrator.AsyncChatPhase;
 import com.aidecision.agentic.orchestrator.OrchestratorEngine;
+import com.aidecision.agentic.util.AfterCommitTasks;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -20,6 +22,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,9 +36,19 @@ class AsyncChatServiceTest {
     private AsyncChatProcessor processor;
     @Mock
     private OrchestratorEngine engine;
+    @Mock
+    private AfterCommitTasks afterCommit;
 
     @InjectMocks
     private AsyncChatService asyncChatService;
+
+    @BeforeEach
+    void setUp() {
+        lenient().doAnswer(inv -> {
+            inv.getArgument(0, Runnable.class).run();
+            return null;
+        }).when(afterCommit).run(any());
+    }
 
     @Test
     void submit_createsStatusLinksRunAndStartsAsyncProcessing() {

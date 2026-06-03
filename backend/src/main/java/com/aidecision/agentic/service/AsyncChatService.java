@@ -7,6 +7,7 @@ import com.aidecision.agentic.entity.AsyncChatStatus;
 import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.orchestrator.AsyncChatPhase;
 import com.aidecision.agentic.orchestrator.OrchestratorEngine;
+import com.aidecision.agentic.util.AfterCommitTasks;
 import com.aidecision.agentic.util.LogSanitizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,14 +24,17 @@ public class AsyncChatService {
     private final AsyncChatStatusService statusService;
     private final AsyncChatProcessor processor;
     private final OrchestratorEngine engine;
+    private final AfterCommitTasks afterCommit;
 
     public AsyncChatService(
             AsyncChatStatusService statusService,
             AsyncChatProcessor processor,
-            OrchestratorEngine engine) {
+            OrchestratorEngine engine,
+            AfterCommitTasks afterCommit) {
         this.statusService = statusService;
         this.processor = processor;
         this.engine = engine;
+        this.afterCommit = afterCommit;
     }
 
     @Transactional
@@ -49,11 +53,13 @@ public class AsyncChatService {
         OrchestratorRun run = engine.submitQuestion(request.question(), conversationId, request.userId());
         statusService.linkRun(status.getRequestId(), run.getRunId());
 
-        processor.processRun(status.getRequestId(), run.getRunId());
+        UUID requestId = status.getRequestId();
+        UUID runId = run.getRunId();
+        afterCommit.run(() -> processor.processRun(requestId, runId));
 
-        String pollPath = "/agent/async-chat/" + status.getRequestId();
+        String pollPath = "/agent/async-chat/" + requestId;
         return new AsyncChatSubmitResponse(
-                status.getRequestId().toString(),
+                requestId.toString(),
                 AsyncChatPhase.PLANNING.name(),
                 pollPath);
     }

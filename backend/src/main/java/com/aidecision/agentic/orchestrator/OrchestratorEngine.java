@@ -12,7 +12,9 @@ import com.aidecision.agentic.util.LogSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -35,6 +37,7 @@ public class OrchestratorEngine {
     private final AsyncChatStatusService asyncChatStatus;
     private final OrchestratorProperties props;
     private final ObjectMapper mapper;
+    private final OrchestratorEngine self;
 
     public OrchestratorEngine(
             OrchestratorRunRepository runRepo,
@@ -46,7 +49,8 @@ public class OrchestratorEngine {
             QaEvaluationService evaluationService,
             AsyncChatStatusService asyncChatStatus,
             OrchestratorProperties props,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            @Lazy OrchestratorEngine self) {
         this.runRepo = runRepo;
         this.stepRepo = stepRepo;
         this.planner = planner;
@@ -57,9 +61,10 @@ public class OrchestratorEngine {
         this.asyncChatStatus = asyncChatStatus;
         this.props = props;
         this.mapper = mapper;
+        this.self = self;
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public OrchestratorRun submitQuestion(String question, UUID conversationId, String userId) {
         OrchestratorRun run = new OrchestratorRun();
         run.setQuestion(question.trim());
@@ -75,7 +80,6 @@ public class OrchestratorEngine {
         return saved;
     }
 
-    @Transactional
     public void processRun(UUID runId) {
         OrchestratorRun run = runRepo.findById(runId).orElse(null);
         if (run == null) {
@@ -86,7 +90,7 @@ public class OrchestratorEngine {
             log.debug("Run {} processRun status={}", runId, run.getStatus());
             switch (RunStatus.valueOf(run.getStatus())) {
                 case PENDING -> {
-                    planAndPersistWorkflow(run);
+                    self.planAndPersistWorkflow(run);
                     executeRunningWorkflow(run.getRunId());
                 }
                 case RUNNING -> executeRunningWorkflow(run.getRunId());
@@ -105,7 +109,7 @@ public class OrchestratorEngine {
      * Plans workflow and persists run + steps. Commits before execution so parallel step workers
      * ({@link WorkflowStepRunner} REQUIRES_NEW) can load rows from the database.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void planAndPersistWorkflow(OrchestratorRun run) throws Exception {
         log.info("Run {} planAndPersistWorkflow question={}", run.getRunId(), LogSanitizer.question(run.getQuestion()));
         run.setStatus(RunStatus.PLANNING.name());
@@ -216,14 +220,14 @@ public class OrchestratorEngine {
 
     public void resumeRun(OrchestratorRun run) throws Exception {
         if (run.getWorkflowJson() == null || run.getWorkflowJson().isBlank()) {
-            planAndPersistWorkflow(run);
+            self.planAndPersistWorkflow(run);
         } else {
-            resetFailedStepsForResume(run);
+            self.resetFailedStepsForResume(run);
         }
         executeRunningWorkflow(run.getRunId());
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     protected void resetFailedStepsForResume(OrchestratorRun run) {
         run.setStatus(RunStatus.RUNNING.name());
         run.setErrorMessage(null);
