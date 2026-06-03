@@ -34,6 +34,9 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-ai-rag-agentic-ai
+      cancel-in-progress: true
     permissions:
       contents: read
 
