@@ -86,19 +86,53 @@ jobs:
             --name "${{ env.AZURE_WEBAPP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
             --query "enabledHostNames[?contains(@, '.scm.')] | [0]" -o tsv)
+          if [ -z "$SCM_HOST" ]; then
+            echo "Could not resolve SCM host; continuing." >&2
+            exit 0
+          fi
           TOKEN=$(az account get-access-token --resource https://appservice.azure.com --query accessToken -o tsv)
-          for i in $(seq 1 30); do
-            COMPLETE=$(curl -sf -H "Authorization: Bearer $TOKEN" \
-              "https://${SCM_HOST}/api/deployments/latest" | jq -r '.complete // false')
-            if [ "$COMPLETE" = "true" ]; then
-              echo "No deployment lock (attempt $i)."
-              exit 0
+
+          fetch_latest_complete() {
+            local resp http body
+            resp=$(curl -sS --max-time 30 -w "\n%{http_code}" \
+              -H "Authorization: Bearer $TOKEN" \
+              "https://${SCM_HOST}/api/deployments/latest") || return 1
+            http=$(printf '%s' "$resp" | tail -n1)
+            body=$(printf '%s' "$resp" | sed '$d')
+            if [ "$http" = "404" ]; then
+              echo "true"
+              return 0
             fi
-            echo "Deployment still in progress (attempt $i/30); waiting 20s..."
+            if [ "$http" != "200" ]; then
+              echo "SCM /api/deployments/latest returned HTTP $http" >&2
+              return 1
+            fi
+            printf '%s' "$body" | jq -r '.complete // false'
+          }
+
+          for i in $(seq 1 15); do
+            if COMPLETE=$(fetch_latest_complete); then
+              if [ "$COMPLETE" = "true" ]; then
+                echo "No deployment lock (attempt $i)."
+                exit 0
+              fi
+              echo "Deployment still in progress (attempt $i/15); waiting 20s..."
+            else
+              echo "SCM unreachable on attempt $i/15; waiting 20s..."
+            fi
             sleep 20
           done
-          echo "Timed out waiting for prior deployment to finish." >&2
-          exit 1
+
+          echo "Timed out waiting for SCM lock; restarting app to clear stale OneDeploy state..."
+          az webapp restart \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}"
+          sleep 45
+          if COMPLETE=$(fetch_latest_complete) && [ "$COMPLETE" = "true" ]; then
+            echo "Lock cleared after restart."
+            exit 0
+          fi
+          echo "Deployment lock still present after restart; continuing anyway." >&2
 
       - name: Deploy JAR to Azure App Service
         uses: azure/webapps-deploy@v3
