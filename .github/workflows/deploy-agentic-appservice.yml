@@ -157,6 +157,27 @@ jobs:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           resource-group-name: ${{ env.AZURE_RESOURCE_GROUP }}
           package: backend/target/${{ steps.jar.outputs.path }}
+          clean: true
+
+      - name: Verify deployed app.jar on App Service
+        run: |
+          set -euo pipefail
+          LOCAL_SIZE=$(wc -c < "backend/target/${{ steps.jar.outputs.path }}")
+          SCM_HOST=$(az webapp show \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --query "enabledHostNames[?contains(@, '.scm.')] | [0]" -o tsv)
+          TOKEN=$(az account get-access-token --resource https://appservice.azure.com --query accessToken -o tsv)
+          REMOTE_SIZE=$(curl -sS -H "Authorization: Bearer $TOKEN" \
+            "https://${SCM_HOST}/api/vfs/site/wwwroot/app.jar" -o /tmp/remote-app.jar)
+          REMOTE_BYTES=$(wc -c < /tmp/remote-app.jar)
+          echo "Local JAR: ${LOCAL_SIZE} bytes; remote app.jar: ${REMOTE_BYTES} bytes"
+          if [ "$LOCAL_SIZE" != "$REMOTE_BYTES" ]; then
+            echo "Deployed app.jar size mismatch — upload may be truncated." >&2
+            exit 1
+          fi
+          unzip -t /tmp/remote-app.jar
+          jar tf /tmp/remote-app.jar | grep -q 'BOOT-INF/classes/com/aidecision/agentic/AgenticApplication.class'
 
       - name: Ensure WEBSITES_PORT is 80 (no restart — OneDeploy already restarted)
         run: |
