@@ -9,6 +9,7 @@ import com.aidecision.agentic.tool.AgentTool;
 import com.aidecision.agentic.tool.ToolExecutionContext;
 import com.aidecision.agentic.tool.ToolRegistryService;
 import com.aidecision.agentic.tool.ToolResult;
+import com.aidecision.agentic.util.LogSanitizer;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -91,6 +92,12 @@ public class WorkflowExecutor {
                 return false;
             }
 
+            log.info("Run {} execution round {} running {} step(s): {}",
+                    run.getRunId(),
+                    round + 1,
+                    ready.size(),
+                    ready.stream().map(s -> s.getStepKey() + "/" + s.getToolName()).toList());
+
             if (!executeReadyWaveParallel(run, ready)) {
                 return false;
             }
@@ -125,6 +132,7 @@ public class WorkflowExecutor {
             if (dependenciesMet(step, byKey)) {
                 step.setStatus(StepStatus.READY.name());
                 stepRepo.save(step);
+                log.debug("Run {} step {} marked READY", step.getRunId(), step.getStepKey());
             }
         }
     }
@@ -163,6 +171,8 @@ public class WorkflowExecutor {
         }
         if (anyRetry) {
             log.debug("Run {} has steps scheduled for retry", run.getRunId());
+        } else {
+            log.info("Run {} completed parallel wave of {} step(s)", run.getRunId(), readySteps.size());
         }
         return true;
     }
@@ -238,6 +248,11 @@ public class WorkflowExecutor {
         step.setErrorMessage(message == null ? "unknown error" : message.substring(0, Math.min(512, message.length())));
         step.setFinishedAt(Instant.now());
         stepRepo.save(step);
+        log.warn("Run {} step {} tool {} failed: {}",
+                step.getRunId(),
+                step.getStepKey(),
+                step.getToolName(),
+                LogSanitizer.message(message));
     }
 
     private static boolean allCompleted(List<OrchestratorStep> steps) {

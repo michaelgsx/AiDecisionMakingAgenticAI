@@ -9,13 +9,18 @@ import com.aidecision.agentic.orchestrator.WorkflowDagValidator;
 import com.aidecision.agentic.orchestrator.WorkflowPlannerService;
 import com.aidecision.agentic.orchestrator.WorkflowValidationResult;
 import com.aidecision.agentic.tool.ToolRegistryService;
+import com.aidecision.agentic.util.LogSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
 
 @Service
 public class WorkflowValidationService {
+
+    private static final Logger log = LoggerFactory.getLogger(WorkflowValidationService.class);
 
     private final WorkflowDagValidator dagValidator;
     private final WorkflowPlannerService planner;
@@ -54,6 +59,15 @@ public class WorkflowValidationService {
         Map<String, OrchestratorTool> tools = toolRegistry.enabledToolsByName();
         WorkflowValidationResult result = dagValidator.validateExecutable(
                 dag, tools, true, toolRegistry::hasExecutor);
+
+        log.info("Workflow validation valid={} steps={} waves={} errors={}",
+                result.valid(),
+                dag.steps().size(),
+                result.executionWaves().size(),
+                result.errors().size());
+        if (!result.valid()) {
+            log.warn("Workflow validation errors: {}", LogSanitizer.text(String.join("; ", result.errors())));
+        }
 
         return new WorkflowValidateResponse(
                 result.valid(),

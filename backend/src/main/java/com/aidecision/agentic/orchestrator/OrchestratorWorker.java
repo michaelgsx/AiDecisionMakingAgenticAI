@@ -3,6 +3,7 @@ package com.aidecision.agentic.orchestrator;
 import com.aidecision.agentic.config.OrchestratorProperties;
 import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.repository.OrchestratorRunRepository;
+import com.aidecision.agentic.util.LogSanitizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -35,7 +36,9 @@ public class OrchestratorWorker {
             try {
                 engine.processRun(run.getRunId());
             } catch (Exception e) {
-                log.warn("Worker could not process run {}: {}", run.getRunId(), e.getMessage());
+                log.warn("Worker could not process run {}: {}",
+                        run.getRunId(),
+                        LogSanitizer.message(e.getMessage()));
             }
         }
     }

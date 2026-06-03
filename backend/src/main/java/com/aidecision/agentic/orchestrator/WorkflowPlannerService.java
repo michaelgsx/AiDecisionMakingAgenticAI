@@ -4,6 +4,7 @@ import com.aidecision.agentic.config.AzureOpenAiProperties;
 import com.aidecision.agentic.config.OrchestratorProperties;
 import com.aidecision.agentic.entity.OrchestratorTool;
 import com.aidecision.agentic.tool.ToolRegistryService;
+import com.aidecision.agentic.util.LogSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -55,6 +56,7 @@ public class WorkflowPlannerService {
     }
 
     public WorkflowDag plan(String question) throws Exception {
+        log.info("Planning workflow question={}", LogSanitizer.question(question));
         Map<String, OrchestratorTool> tools = toolRegistry.enabledToolsByName();
         if (tools.isEmpty()) {
             log.warn("No enabled tools in orchestrator_tool; using default DAG only");
@@ -63,6 +65,9 @@ public class WorkflowPlannerService {
             try {
                 PlannerWorkflowResponse response = callPlannerLlm(question, tools);
                 if (response.isInsufficientTools()) {
+                    log.warn("Planner refused question={} missingTools={}",
+                            LogSanitizer.question(question),
+                            response.missingTools());
                     throw new InsufficientToolsException(
                             response.message() == null || response.message().isBlank()
                                     ? "Not enough tools to answer this question."
@@ -71,15 +76,18 @@ public class WorkflowPlannerService {
                 }
                 WorkflowDag dag = response.toDag();
                 validator.validate(dag, tools);
+                log.info("LLM planner produced {} step(s)", dag.steps().size());
                 return dag;
             } catch (InsufficientToolsException e) {
                 throw e;
             } catch (Exception e) {
-                log.warn("LLM workflow planning failed, using default DAG: {}", e.getMessage());
+                log.warn("LLM workflow planning failed, using default DAG: {}",
+                        LogSanitizer.message(e.getMessage()));
             }
         }
         WorkflowDag fallback = defaultDag(question);
         validator.validate(fallback, tools);
+        log.info("Using default workflow with {} step(s)", fallback.steps().size());
         return fallback;
     }
 

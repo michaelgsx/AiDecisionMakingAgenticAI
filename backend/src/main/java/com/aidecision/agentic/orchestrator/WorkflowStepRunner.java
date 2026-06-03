@@ -8,6 +8,7 @@ import com.aidecision.agentic.tool.AgentTool;
 import com.aidecision.agentic.tool.ToolExecutionContext;
 import com.aidecision.agentic.tool.ToolRegistryService;
 import com.aidecision.agentic.tool.ToolResult;
+import com.aidecision.agentic.util.LogSanitizer;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -64,6 +65,12 @@ public class WorkflowStepRunner {
         step.setStartedAt(Instant.now());
         step.setAttemptCount(step.getAttemptCount() + 1);
         stepRepo.save(step);
+        log.info("Run {} step {} tool {} attempt {}/{} started",
+                runId,
+                step.getStepKey(),
+                step.getToolName(),
+                step.getAttemptCount(),
+                maxAttemptsForTool(step.getToolName()));
 
         try {
             Map<String, String> prior = collectPriorOutputs(step, stepsByKey);
@@ -88,9 +95,18 @@ public class WorkflowStepRunner {
             step.setFinishedAt(Instant.now());
             step.setStatus(StepStatus.COMPLETED.name());
             stepRepo.save(step);
+            log.info("Run {} step {} tool {} completed output={}",
+                    runId,
+                    step.getStepKey(),
+                    step.getToolName(),
+                    LogSanitizer.jsonSummary(step.getOutputJson()));
             return new StepRunResult(StepOutcome.COMPLETED, null);
         } catch (Exception e) {
-            log.warn("Step {} failed: {}", step.getStepKey(), e.getMessage());
+            log.warn("Run {} step {} tool {} failed: {}",
+                    runId,
+                    step.getStepKey(),
+                    step.getToolName(),
+                    LogSanitizer.message(e.getMessage()));
             return failOrRetry(step, e.getMessage());
         }
     }
@@ -104,7 +120,13 @@ public class WorkflowStepRunner {
             step.setFinishedAt(null);
             step.setOutputJson(null);
             stepRepo.save(step);
-            log.warn("Retrying step {} (attempt {}/{}): {}", step.getStepKey(), step.getAttemptCount(), maxAttempts, message);
+            log.warn("Run {} step {} tool {} retry scheduled ({}/{}): {}",
+                    step.getRunId(),
+                    step.getStepKey(),
+                    step.getToolName(),
+                    step.getAttemptCount(),
+                    maxAttempts,
+                    LogSanitizer.message(message));
             return new StepRunResult(StepOutcome.RETRY_READY, message);
         }
         step.setStatus(StepStatus.FAILED.name());

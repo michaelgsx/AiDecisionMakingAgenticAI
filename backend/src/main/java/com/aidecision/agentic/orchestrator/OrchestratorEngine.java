@@ -7,6 +7,7 @@ import com.aidecision.agentic.repository.OrchestratorRunRepository;
 import com.aidecision.agentic.repository.OrchestratorStepRepository;
 import com.aidecision.agentic.service.QaEvaluationService;
 import com.aidecision.agentic.tool.ToolRegistryService;
+import com.aidecision.agentic.util.LogSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,7 +62,13 @@ public class OrchestratorEngine {
         run.setConversationId(conversationId);
         run.setUserId(blankToNull(userId));
         run.setStatus(RunStatus.PENDING.name());
-        return runRepo.save(run);
+        OrchestratorRun saved = runRepo.save(run);
+        log.info("Run {} submitted question={} userId={} conversationId={}",
+                saved.getRunId(),
+                LogSanitizer.question(saved.getQuestion()),
+                LogSanitizer.userId(saved.getUserId()),
+                conversationId);
+        return saved;
     }
 
     @Transactional
@@ -72,21 +79,23 @@ public class OrchestratorEngine {
         }
 
         try {
+            log.debug("Run {} processRun status={}", runId, run.getStatus());
             switch (RunStatus.valueOf(run.getStatus())) {
                 case PENDING -> planAndStart(run);
                 case RUNNING -> advanceRun(run);
                 default -> { }
             }
         } catch (InsufficientToolsException e) {
-            log.warn("Orchestrator insufficient tools for run {}: {}", runId, e.getMessage());
+            log.warn("Orchestrator insufficient tools for run {}: {}", runId, LogSanitizer.message(e.getMessage()));
             failRun(run, formatInsufficientToolsMessage(e));
         } catch (Exception e) {
-            log.error("Orchestrator failed run {}", runId, e);
+            log.error("Orchestrator failed run {}: {}", runId, LogSanitizer.message(e.getMessage()), e);
             failRun(run, e.getMessage());
         }
     }
 
     private void planAndStart(OrchestratorRun run) throws Exception {
+        log.info("Run {} planAndStart question={}", run.getRunId(), LogSanitizer.question(run.getQuestion()));
         run.setStatus(RunStatus.PLANNING.name());
         runRepo.save(run);
 
@@ -94,9 +103,13 @@ public class OrchestratorEngine {
         WorkflowValidationResult validation = dagValidator.validateExecutable(
                 dag, toolRegistry.enabledToolsByName(), true, toolRegistry::hasExecutor);
         if (!validation.valid()) {
+            log.warn("Run {} workflow validation failed: {}", run.getRunId(),
+                    LogSanitizer.text(String.join("; ", validation.errors())));
             throw new IllegalArgumentException("Workflow validation failed: "
                     + String.join("; ", validation.errors()));
         }
+        log.info("Run {} planned {} steps across {} execution wave(s)",
+                run.getRunId(), dag.steps().size(), validation.executionWaves().size());
 
         run.setWorkflowJson(mapper.writeValueAsString(dag));
         persistSteps(run, dag);
@@ -108,11 +121,14 @@ public class OrchestratorEngine {
     }
 
     private void executeSyncWorkflow(OrchestratorRun run) throws Exception {
+        log.info("Run {} executeSyncWorkflow started", run.getRunId());
         if (!executor.runSyncWorkflowToCompletion(run)) {
             List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
             if (steps.stream().anyMatch(s -> StepStatus.FAILED.name().equals(s.getStatus()))) {
+                log.warn("Run {} failed: one or more steps failed", run.getRunId());
                 failRun(run, "One or more workflow steps failed");
             } else {
+                log.warn("Run {} failed: deadlock or retry limit exceeded", run.getRunId());
                 failRun(run, "Workflow execution deadlock or exceeded retry limit");
             }
             return;
@@ -140,6 +156,8 @@ public class OrchestratorEngine {
             step.setMaxTimeMs(maxTime);
             step.setTimeoutMs(timeout);
             stepRepo.save(step);
+            log.debug("Run {} persisted step {} tool={} deps={}",
+                    run.getRunId(), def.id(), def.tool(), def.dependsOn());
         }
     }
 
@@ -155,6 +173,10 @@ public class OrchestratorEngine {
         run.setCheckpointJson(mapper.writeValueAsString(Map.of("phase", "completed")));
         runRepo.save(run);
         evaluationService.enqueueCompletedRun(run);
+        log.info("Run {} completed answerLen={} steps={}",
+                run.getRunId(),
+                answer == null ? 0 : answer.length(),
+                steps.size());
     }
 
     private String extractFinalAnswer(List<OrchestratorStep> steps) {
@@ -205,6 +227,7 @@ public class OrchestratorEngine {
         run.setStatus(RunStatus.FAILED.name());
         run.setErrorMessage(message);
         runRepo.save(run);
+        log.warn("Run {} failed: {}", run.getRunId(), LogSanitizer.message(message));
     }
 
     private static String blankToNull(String s) {

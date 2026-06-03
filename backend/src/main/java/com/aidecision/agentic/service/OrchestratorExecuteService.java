@@ -16,8 +16,11 @@ import com.aidecision.agentic.repository.OrchestratorRunRepository;
 import com.aidecision.agentic.repository.OrchestratorStepRepository;
 import com.aidecision.agentic.tool.AsyncToolSupport;
 import com.aidecision.agentic.tool.ToolRegistryService;
+import com.aidecision.agentic.util.LogSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +29,8 @@ import java.util.UUID;
 
 @Service
 public class OrchestratorExecuteService {
+
+    private static final Logger log = LoggerFactory.getLogger(OrchestratorExecuteService.class);
 
     private final OrchestratorEngine engine;
     private final OrchestratorRunRepository runRepo;
@@ -54,6 +59,12 @@ public class OrchestratorExecuteService {
 
     @Transactional
     public ExecuteResponse execute(ExecuteRequest request) throws InterruptedException {
+        log.info("Execute request question={} userId={} conversationId={} transactionId={}",
+                LogSanitizer.question(request.question()),
+                LogSanitizer.userId(request.userId()),
+                request.conversationId(),
+                request.transactionId() == null ? "(none)" : LogSanitizer.text(request.transactionId()));
+
         UUID conversationId = parseUuid(request.conversationId());
         OrchestratorRun run = engine.submitQuestion(request.question(), conversationId, request.userId());
         if (request.transactionId() != null && !request.transactionId().isBlank()) {
@@ -65,24 +76,37 @@ public class OrchestratorExecuteService {
         for (int i = 0; i < 40; i++) {
             RunStatusResponse status = loadRun(run.getRunId());
             if (isTerminal(status.status())) {
+                log.info("Run {} execute finished status={} steps={} answerLen={}",
+                        run.getRunId(),
+                        status.status(),
+                        status.steps().size(),
+                        status.answer() == null ? 0 : status.answer().length());
                 return assembler.toExecuteResponse(status);
             }
             if (needsClientInput(status)) {
                 markWaitingAsync(run.getRunId());
+                log.info("Run {} execute waiting for client input pendingAsync={}",
+                        run.getRunId(),
+                        status.pendingAsync().size());
                 return assembler.toExecuteResponse(loadRun(run.getRunId()));
             }
             if (hasPollOnlyPending(status)) {
+                log.info("Run {} execute waiting for poll-only async step", run.getRunId());
                 return assembler.toExecuteResponse(status);
             }
             engine.processRun(run.getRunId());
             Thread.sleep(200);
         }
 
-        return assembler.toExecuteResponse(loadRun(run.getRunId()));
+        RunStatusResponse finalStatus = loadRun(run.getRunId());
+        log.warn("Run {} execute timed out after polling; status={}", run.getRunId(), finalStatus.status());
+        return assembler.toExecuteResponse(finalStatus);
     }
 
     @Transactional
     public RunStatusResponse submitFeedback(UUID runId, AsyncToolFeedbackRequest body) {
+        log.info("Run {} async feedback stepKey={} result={}",
+                runId, body.stepKey(), LogSanitizer.text(body.result()));
         OrchestratorRun run = runRepo.findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown runId: " + runId));
         validateUser(run, body.userId());
@@ -123,6 +147,7 @@ public class OrchestratorExecuteService {
 
     @Transactional
     public RunStatusResponse pollAsyncStep(UUID runId, AsyncToolPollRequest body) {
+        log.info("Run {} async poll stepKey={} tool={}", runId, body.stepKey(), body.toolName());
         OrchestratorRun run = runRepo.findById(runId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown runId: " + runId));
 
