@@ -79,6 +79,27 @@ jobs:
             --url "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Web/sites/${{ env.AZURE_WEBAPP_NAME }}/config/web?api-version=2023-12-01" \
             --body '{"properties":{"appCommandLine":""}}'
 
+      - name: Wait for prior deployment lock to clear
+        run: |
+          set -euo pipefail
+          SCM_HOST=$(az webapp show \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+            --query "enabledHostNames[?contains(@, '.scm.')] | [0]" -o tsv)
+          TOKEN=$(az account get-access-token --resource https://appservice.azure.com --query accessToken -o tsv)
+          for i in $(seq 1 30); do
+            COMPLETE=$(curl -sf -H "Authorization: Bearer $TOKEN" \
+              "https://${SCM_HOST}/api/deployments/latest" | jq -r '.complete // false')
+            if [ "$COMPLETE" = "true" ]; then
+              echo "No deployment lock (attempt $i)."
+              exit 0
+            fi
+            echo "Deployment still in progress (attempt $i/30); waiting 20s..."
+            sleep 20
+          done
+          echo "Timed out waiting for prior deployment to finish." >&2
+          exit 1
+
       - name: Deploy JAR to Azure App Service
         uses: azure/webapps-deploy@v3
         with:
