@@ -32,7 +32,7 @@ public class QaFeedback {
     @Column(name = "comment", length = 2000)
     private String comment;
 
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "created_at", nullable = false, columnDefinition = "DATETIME2")
     private Instant createdAt;
 
     @PrePersist

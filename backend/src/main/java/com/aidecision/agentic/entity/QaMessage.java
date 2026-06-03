@@ -29,7 +29,7 @@ public class QaMessage {
     @Column(name = "model_name", length = 128)
     private String modelName;
 
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "created_at", nullable = false, columnDefinition = "DATETIME2")
     private Instant createdAt;
 
     @PrePersist

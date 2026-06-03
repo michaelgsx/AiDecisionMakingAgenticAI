@@ -48,19 +48,19 @@ public class OrchestratorStep {
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount = 0;
 
-    @Column(name = "started_at")
+    @Column(name = "started_at", columnDefinition = "DATETIME2")
     private Instant startedAt;
 
-    @Column(name = "finished_at")
+    @Column(name = "finished_at", columnDefinition = "DATETIME2")
     private Instant finishedAt;
 
     @Column(name = "error_message", length = 512)
     private String errorMessage;
 
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "created_at", nullable = false, columnDefinition = "DATETIME2")
     private Instant createdAt;
 
-    @Column(name = "updated_at", nullable = false)
+    @Column(name = "updated_at", nullable = false, columnDefinition = "DATETIME2")
     private Instant updatedAt;
 
     @PrePersist

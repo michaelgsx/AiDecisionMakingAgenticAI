@@ -24,10 +24,10 @@ public class QaConversation {
     @Column(name = "title", length = 256)
     private String title;
 
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "created_at", nullable = false, columnDefinition = "DATETIME2")
     private Instant createdAt;
 
-    @Column(name = "updated_at", nullable = false)
+    @Column(name = "updated_at", nullable = false, columnDefinition = "DATETIME2")
     private Instant updatedAt;
 
     @PrePersist

@@ -42,10 +42,10 @@ public class OrchestratorRun {
     @Column(name = "checkpoint_json", columnDefinition = "nvarchar(max)")
     private String checkpointJson;
 
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "created_at", nullable = false, columnDefinition = "DATETIME2")
     private Instant createdAt;
 
-    @Column(name = "updated_at", nullable = false)
+    @Column(name = "updated_at", nullable = false, columnDefinition = "DATETIME2")
     private Instant updatedAt;
 
     @PrePersist
