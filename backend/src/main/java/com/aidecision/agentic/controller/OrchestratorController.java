@@ -2,6 +2,8 @@ package com.aidecision.agentic.controller;
 
 import com.aidecision.agentic.dto.AskRequest;
 import com.aidecision.agentic.dto.AskResponse;
+import com.aidecision.agentic.dto.AsyncChatPollResponse;
+import com.aidecision.agentic.dto.AsyncChatSubmitResponse;
 import com.aidecision.agentic.dto.AsyncToolFeedbackRequest;
 import com.aidecision.agentic.dto.AsyncToolPollRequest;
 import com.aidecision.agentic.dto.ExecuteRequest;
@@ -10,6 +12,7 @@ import com.aidecision.agentic.dto.HumanResponseRequest;
 import com.aidecision.agentic.dto.RunStatusResponse;
 import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.orchestrator.OrchestratorEngine;
+import com.aidecision.agentic.service.AsyncChatService;
 import com.aidecision.agentic.service.OrchestratorExecuteService;
 import com.aidecision.agentic.service.OrchestratorQueryService;
 import jakarta.validation.Valid;
@@ -29,14 +32,17 @@ public class OrchestratorController {
     private final OrchestratorEngine engine;
     private final OrchestratorQueryService query;
     private final OrchestratorExecuteService executeService;
+    private final AsyncChatService asyncChatService;
 
     public OrchestratorController(
             OrchestratorEngine engine,
             OrchestratorQueryService query,
-            OrchestratorExecuteService executeService) {
+            OrchestratorExecuteService executeService,
+            AsyncChatService asyncChatService) {
         this.engine = engine;
         this.query = query;
         this.executeService = executeService;
+        this.asyncChatService = asyncChatService;
     }
 
     /** Submit question; poll {@code GET /agent/runs/{runId}} until complete or async pending. */
@@ -57,6 +63,17 @@ public class OrchestratorController {
     @PostMapping("/execute")
     public ExecuteResponse execute(@Valid @RequestBody ExecuteRequest request) throws InterruptedException {
         return executeService.execute(request);
+    }
+
+    /** Submit question for async processing; poll {@code GET /agent/async-chat/{requestId}} until DONE or FAILED. */
+    @PostMapping("/async-chat")
+    public AsyncChatSubmitResponse asyncChat(@Valid @RequestBody ExecuteRequest request) {
+        return asyncChatService.submit(request);
+    }
+
+    @GetMapping("/async-chat/{requestId}")
+    public AsyncChatPollResponse asyncChatPoll(@PathVariable String requestId) {
+        return asyncChatService.poll(UUID.fromString(requestId));
     }
 
     @GetMapping("/runs/{runId}")

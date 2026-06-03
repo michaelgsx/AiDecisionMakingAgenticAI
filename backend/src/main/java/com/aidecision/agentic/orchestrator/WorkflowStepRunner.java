@@ -4,6 +4,7 @@ import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.entity.OrchestratorStep;
 import com.aidecision.agentic.repository.OrchestratorRunRepository;
 import com.aidecision.agentic.repository.OrchestratorStepRepository;
+import com.aidecision.agentic.service.AsyncChatStatusService;
 import com.aidecision.agentic.tool.AgentTool;
 import com.aidecision.agentic.tool.ToolExecutionContext;
 import com.aidecision.agentic.tool.ToolRegistryService;
@@ -32,16 +33,19 @@ public class WorkflowStepRunner {
     private final OrchestratorRunRepository runRepo;
     private final OrchestratorStepRepository stepRepo;
     private final ToolRegistryService toolRegistry;
+    private final AsyncChatStatusService asyncChatStatus;
     private final ObjectMapper mapper;
 
     public WorkflowStepRunner(
             OrchestratorRunRepository runRepo,
             OrchestratorStepRepository stepRepo,
             ToolRegistryService toolRegistry,
+            AsyncChatStatusService asyncChatStatus,
             ObjectMapper mapper) {
         this.runRepo = runRepo;
         this.stepRepo = stepRepo;
         this.toolRegistry = toolRegistry;
+        this.asyncChatStatus = asyncChatStatus;
         this.mapper = mapper;
     }
 
@@ -67,6 +71,7 @@ public class WorkflowStepRunner {
         step.setStartedAt(Instant.now());
         step.setAttemptCount(step.getAttemptCount() + 1);
         stepRepo.save(step);
+        asyncChatStatus.markStepStarted(runId, step.getStepKey(), step.getToolName());
         log.info("Run {} step {} tool {} attempt {}/{} started",
                 runId,
                 step.getStepKey(),

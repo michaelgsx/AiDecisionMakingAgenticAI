@@ -5,6 +5,7 @@ import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.entity.OrchestratorStep;
 import com.aidecision.agentic.repository.OrchestratorRunRepository;
 import com.aidecision.agentic.repository.OrchestratorStepRepository;
+import com.aidecision.agentic.service.AsyncChatStatusService;
 import com.aidecision.agentic.service.QaEvaluationService;
 import com.aidecision.agentic.tool.ToolRegistryService;
 import com.aidecision.agentic.util.LogSanitizer;
@@ -31,6 +32,7 @@ public class OrchestratorEngine {
     private final WorkflowDagValidator dagValidator;
     private final ToolRegistryService toolRegistry;
     private final QaEvaluationService evaluationService;
+    private final AsyncChatStatusService asyncChatStatus;
     private final OrchestratorProperties props;
     private final ObjectMapper mapper;
 
@@ -42,6 +44,7 @@ public class OrchestratorEngine {
             WorkflowDagValidator dagValidator,
             ToolRegistryService toolRegistry,
             QaEvaluationService evaluationService,
+            AsyncChatStatusService asyncChatStatus,
             OrchestratorProperties props,
             ObjectMapper mapper) {
         this.runRepo = runRepo;
@@ -51,6 +54,7 @@ public class OrchestratorEngine {
         this.dagValidator = dagValidator;
         this.toolRegistry = toolRegistry;
         this.evaluationService = evaluationService;
+        this.asyncChatStatus = asyncChatStatus;
         this.props = props;
         this.mapper = mapper;
     }
@@ -106,6 +110,7 @@ public class OrchestratorEngine {
         log.info("Run {} planAndPersistWorkflow question={}", run.getRunId(), LogSanitizer.question(run.getQuestion()));
         run.setStatus(RunStatus.PLANNING.name());
         runRepo.save(run);
+        asyncChatStatus.markPlanning(run.getRunId());
 
         WorkflowDag dag = planner.plan(run.getQuestion());
         WorkflowValidationResult validation = dagValidator.validateExecutable(
@@ -181,6 +186,7 @@ public class OrchestratorEngine {
         run.setErrorMessage(null);
         run.setCheckpointJson(mapper.writeValueAsString(Map.of("phase", "completed")));
         runRepo.save(run);
+        asyncChatStatus.markDone(run.getRunId(), answer);
         evaluationService.enqueueCompletedRun(run);
         log.info("Run {} completed answerLen={} steps={}",
                 run.getRunId(),
@@ -240,6 +246,7 @@ public class OrchestratorEngine {
         run.setStatus(RunStatus.FAILED.name());
         run.setErrorMessage(message);
         runRepo.save(run);
+        asyncChatStatus.markFailed(run.getRunId(), message);
         log.warn("Run {} failed: {}", run.getRunId(), LogSanitizer.message(message));
     }
 
