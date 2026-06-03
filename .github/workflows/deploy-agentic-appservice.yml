@@ -110,17 +110,17 @@ jobs:
             printf '%s' "$body" | jq -r '.complete // false'
           }
 
-          for i in $(seq 1 15); do
+          for i in $(seq 1 10); do
             if COMPLETE=$(fetch_latest_complete); then
               if [ "$COMPLETE" = "true" ]; then
                 echo "No deployment lock (attempt $i)."
                 exit 0
               fi
-              echo "Deployment still in progress (attempt $i/15); waiting 20s..."
+              echo "Deployment still in progress (attempt $i/10); waiting 15s..."
             else
-              echo "SCM unreachable on attempt $i/15; waiting 20s..."
+              echo "SCM unreachable on attempt $i/10; waiting 15s..."
             fi
-            sleep 20
+            sleep 15
           done
 
           echo "Timed out waiting for SCM lock; restarting app to clear stale OneDeploy state..."
@@ -141,17 +141,23 @@ jobs:
           resource-group-name: ${{ env.AZURE_RESOURCE_GROUP }}
           package: backend/target/*.jar
 
-      - name: Ensure App Service listens on port 80
+      - name: Ensure WEBSITES_PORT is 80 (no restart — OneDeploy already restarted)
         run: |
           set -euo pipefail
-          az webapp config appsettings set \
+          CURRENT=$(az webapp config appsettings list \
             --name "${{ env.AZURE_WEBAPP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --settings WEBSITES_PORT=80 \
-            --output none
-          az webapp restart \
-            --name "${{ env.AZURE_WEBAPP_NAME }}" \
-            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}"
+            --query "[?name=='WEBSITES_PORT'].value | [0]" -o tsv)
+          if [ "$CURRENT" = "80" ]; then
+            echo "WEBSITES_PORT already 80; skipping."
+          else
+            echo "Setting WEBSITES_PORT=80 (was: ${CURRENT:-unset})"
+            az webapp config appsettings set \
+              --name "${{ env.AZURE_WEBAPP_NAME }}" \
+              --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
+              --settings WEBSITES_PORT=80 \
+              --output none
+          fi
 
       - name: Smoke test /health
         run: |
@@ -162,16 +168,16 @@ jobs:
             --query defaultHostName -o tsv)
           URL="https://${HOST}/health"
           echo "Waiting for ${URL} (App Service cold start can take several minutes)..."
-          for i in $(seq 1 60); do
+          for i in $(seq 1 20); do
             if curl -fsS --max-time 15 "$URL" >/dev/null 2>&1; then
               echo "Health OK after ${i} attempt(s)"
               curl -fsS "$URL"
               exit 0
             fi
-            echo "Attempt ${i}/60 — not ready yet, sleeping 30s..."
-            sleep 30
+            echo "Attempt ${i}/20 — not ready yet, sleeping 15s..."
+            sleep 15
           done
-          echo "Health check failed after 30 minutes" >&2
+          echo "Health check failed after 5 minutes" >&2
           exit 1
 
       - name: Azure logout
