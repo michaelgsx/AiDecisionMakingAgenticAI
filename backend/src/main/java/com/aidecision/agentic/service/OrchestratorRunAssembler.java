@@ -182,6 +182,8 @@ public class OrchestratorRunAssembler {
         return row != null ? row.getVersion() : "1.1.0";
     }
 
+    private static final int MAX_STEP_OUTPUT_CHARS = 32_000;
+
     private RunStatusResponse.StepStatusDto toStepDto(OrchestratorStep s) {
         OrchestratorTool tool = toolRegistry.enabledToolsByName().get(s.getToolName());
         return new RunStatusResponse.StepStatusDto(
@@ -191,7 +193,18 @@ public class OrchestratorRunAssembler {
                 tool != null ? tool.getVersion() : null,
                 s.getStatus(),
                 s.getErrorMessage(),
-                s.getAttemptCount());
+                s.getAttemptCount(),
+                truncateStepOutput(s.getOutputJson()));
+    }
+
+    private static String truncateStepOutput(String outputJson) {
+        if (outputJson == null || outputJson.isBlank()) {
+            return null;
+        }
+        if (outputJson.length() <= MAX_STEP_OUTPUT_CHARS) {
+            return outputJson;
+        }
+        return outputJson.substring(0, MAX_STEP_OUTPUT_CHARS) + "\n... [truncated]";
     }
 
     private static OrchestratorStep findStep(List<OrchestratorStep> steps, String stepKey, UUID stepId) {

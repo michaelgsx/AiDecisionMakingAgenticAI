@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import java.net.URI;
-import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -28,6 +28,7 @@ public class WorkflowPlannerService {
     private final OrchestratorProperties orchProps;
     private final ToolRegistryService toolRegistry;
     private final WorkflowDagValidator validator;
+    private final WorkflowPlannerPromptBuilder promptBuilder;
     private final ObjectMapper mapper;
     private final RestClient http;
 
@@ -36,14 +37,21 @@ public class WorkflowPlannerService {
             OrchestratorProperties orchProps,
             ToolRegistryService toolRegistry,
             WorkflowDagValidator validator,
+            WorkflowPlannerPromptBuilder promptBuilder,
             ObjectMapper mapper,
             RestClient http) {
         this.openAi = openAi;
         this.orchProps = orchProps;
         this.toolRegistry = toolRegistry;
         this.validator = validator;
+        this.promptBuilder = promptBuilder;
         this.mapper = mapper;
         this.http = http;
+    }
+
+    /** Builds the three-part planner prompt without calling the LLM (for inspection / debugging). */
+    public PlannerPrompt buildPrompt(String question) throws Exception {
+        return promptBuilder.build(question, toolRegistry.enabledToolsByName());
     }
 
     public WorkflowDag plan(String question) throws Exception {
@@ -53,9 +61,19 @@ public class WorkflowPlannerService {
         }
         if (openAi.chatConfigured() && !tools.isEmpty()) {
             try {
-                WorkflowDag dag = parseDag(callPlannerLlm(question, tools));
+                PlannerWorkflowResponse response = callPlannerLlm(question, tools);
+                if (response.isInsufficientTools()) {
+                    throw new InsufficientToolsException(
+                            response.message() == null || response.message().isBlank()
+                                    ? "Not enough tools to answer this question."
+                                    : response.message(),
+                            response.missingTools());
+                }
+                WorkflowDag dag = response.toDag();
                 validator.validate(dag, tools);
                 return dag;
+            } catch (InsufficientToolsException e) {
+                throw e;
             } catch (Exception e) {
                 log.warn("LLM workflow planning failed, using default DAG: {}", e.getMessage());
             }
@@ -77,22 +95,25 @@ public class WorkflowPlannerService {
         ));
     }
 
-    private String callPlannerLlm(String question, Map<String, OrchestratorTool> tools) throws Exception {
+    private PlannerWorkflowResponse callPlannerLlm(String question, Map<String, OrchestratorTool> tools)
+            throws Exception {
+        PlannerPrompt prompt = promptBuilder.build(question, tools);
+        String raw = invokeChat(prompt.systemPrompt(), prompt.userPrompt());
+        return parseResponse(raw);
+    }
+
+    String invokeChat(String systemPrompt, String userPrompt) throws Exception {
         String base = openAi.getEndpoint().replaceAll("/+$", "");
         URI uri = URI.create(base + "/openai/deployments/" + openAi.getChatDeployment()
                 + "/chat/completions?api-version=" + openAi.getEffectiveChatApiVersion());
-
-        String toolRegistryJson = buildToolRegistryJson(tools);
-        String system = buildSystemPrompt();
-        String user = buildUserPrompt(question, toolRegistryJson);
 
         ObjectNode root = mapper.createObjectNode();
         root.put("temperature", 0.1);
         root.put("max_tokens", 4096);
         root.set("response_format", mapper.createObjectNode().put("type", "json_object"));
         ArrayNode messages = root.putArray("messages");
-        messages.addObject().put("role", "system").put("content", system);
-        messages.addObject().put("role", "user").put("content", user);
+        messages.addObject().put("role", "system").put("content", systemPrompt);
+        messages.addObject().put("role", "user").put("content", userPrompt);
 
         String body = http.post()
                 .uri(uri)
@@ -106,99 +127,46 @@ public class WorkflowPlannerService {
         return json.path("choices").path(0).path("message").path("content").asText("");
     }
 
-    /** Full orchestrator_tool rows as JSON for the planner (sorted by tool_name). */
-    String buildToolRegistryJson(Map<String, OrchestratorTool> tools) throws Exception {
-        ArrayNode registry = mapper.createArrayNode();
-        tools.values().stream()
-                .sorted(Comparator.comparing(OrchestratorTool::getToolName))
-                .forEach(t -> {
-                    ObjectNode row = registry.addObject();
-                    row.put("toolName", t.getToolName());
-                    row.put("version", t.getVersion());
-                    row.put("toolType", t.getToolType());
-                    row.put("executionMode", t.getExecutionMode());
-                    row.put("description", t.getDescription());
-                    row.set("requestSchema", parseSchemaNode(t.getRequestSchemaJson()));
-                    row.set("responseSchema", parseSchemaNode(t.getResponseSchemaJson()));
-                });
-        return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(registry);
-    }
-
-    private JsonNode parseSchemaNode(String schemaJson) {
-        if (schemaJson == null || schemaJson.isBlank()) {
-            return mapper.createObjectNode();
+    PlannerWorkflowResponse parseResponse(String json) throws Exception {
+        JsonNode root = mapper.readTree(json == null || json.isBlank() ? "{}" : json);
+        String status = root.path("status").asText("").trim();
+        if (status.isBlank()) {
+            // Backward compatibility: bare { "steps": [...] }
+            if (root.path("steps").isArray()) {
+                status = PlannerWorkflowResponse.STATUS_OK;
+            } else {
+                throw new IllegalArgumentException("Planner JSON missing status field");
+            }
         }
-        try {
-            return mapper.readTree(schemaJson);
-        } catch (Exception e) {
-            return mapper.createObjectNode().put("raw", schemaJson);
+
+        String message = root.path("message").asText("").trim();
+        List<String> missingTools = new ArrayList<>();
+        for (JsonNode n : root.path("missingTools")) {
+            String item = n.asText("").trim();
+            if (!item.isBlank()) {
+                missingTools.add(item);
+            }
         }
-    }
 
-    private String buildSystemPrompt() {
-        int maxSteps = orchProps.getMaxStepsPerWorkflow();
-        long defaultMax = orchProps.getDefaultStepMaxTimeMs();
-        long defaultTimeout = orchProps.getDefaultStepTimeoutMs();
-        return """
-                You are the workflow planner for a risk-control agent orchestrator.
+        if (PlannerWorkflowResponse.STATUS_INSUFFICIENT_TOOLS.equalsIgnoreCase(status)) {
+            if (message.isBlank()) {
+                message = "Not enough tools to answer this question.";
+            }
+            return new PlannerWorkflowResponse(status, message, missingTools, List.of());
+        }
 
-                Your task: given a user question and the TOOL REGISTRY (orchestrator_tool), \
-                CREATE a complete execution workflow — a directed acyclic graph (DAG) of tool steps \
-                that answers the question. Output ONLY one JSON object (no markdown, no commentary).
+        if (!PlannerWorkflowResponse.STATUS_OK.equalsIgnoreCase(status)) {
+            throw new IllegalArgumentException("Unknown planner status: " + status);
+        }
 
-                Required output shape:
-                {
-                  "steps": [
-                    {
-                      "id": "s1",
-                      "tool": "<toolName from registry>",
-                      "dependsOn": [],
-                      "params": { },
-                      "maxTimeMs": %d,
-                      "timeoutMs": %d
-                    }
-                  ]
-                }
-
-                Planning rules:
-                1. Use ONLY toolName values present in toolRegistry (enabled tools).
-                2. Every step.id must be unique (e.g. s1, s2, s3).
-                3. dependsOn lists step ids that must finish before this step; no cycles.
-                4. params must match that tool's requestSchema; read each property's description to choose values and branching.
-                5. Use responseSchema property descriptions (e.g. aiLabel, accepted, rowCount) to decide later steps / conditional paths.
-                6. At most %d steps. The LAST step should be llm_answer when possible.
-                7. Similar-case / policy questions: include ai_decision_rag (or similarity_retrieval).
-                8. Counts, aggregates, SQL analytics: include natural_language_to_sql before llm_answer.
-                9. When a human must approve a recommendation before the final answer: insert human_in_the_loop \
-                   (ASYNC) before llm_answer; downstream steps depend on it.
-                10. ASYNC tools stay RUNNING until the user responds via API — give them longer timeoutMs if needed.
-                11. data_acquisition is optional context at the start when features/scenario help later tools.
-                """
-                .formatted(defaultMax, defaultTimeout, maxSteps);
-    }
-
-    private String buildUserPrompt(String question, String toolRegistryJson) {
-        return """
-                Create the workflow DAG for the following user question.
-
-                userQuestion:
-                %s
-
-                toolRegistry (from orchestrator_tool — use only these tools):
-                %s
-                """
-                .formatted(question.trim(), toolRegistryJson);
-    }
-
-    private WorkflowDag parseDag(String json) throws Exception {
-        JsonNode root = mapper.readTree(json);
         JsonNode stepsNode = root.path("steps");
-        if (!stepsNode.isArray()) {
-            throw new IllegalArgumentException("Planner JSON missing steps array");
+        if (!stepsNode.isArray() || stepsNode.isEmpty()) {
+            throw new IllegalArgumentException("Planner status=ok requires non-empty steps array");
         }
-        List<WorkflowDag.WorkflowStepDef> steps = new java.util.ArrayList<>();
+
+        List<WorkflowDag.WorkflowStepDef> steps = new ArrayList<>();
         for (JsonNode n : stepsNode) {
-            List<String> deps = new java.util.ArrayList<>();
+            List<String> deps = new ArrayList<>();
             for (JsonNode d : n.path("dependsOn")) {
                 deps.add(d.asText());
             }
@@ -213,6 +181,10 @@ public class WorkflowPlannerService {
                     n.has("timeoutMs") ? n.path("timeoutMs").asInt() : null
             ));
         }
-        return new WorkflowDag(steps);
+
+        if (message.isBlank()) {
+            message = "Planned " + steps.size() + " step(s).";
+        }
+        return new PlannerWorkflowResponse(status, message, List.of(), steps);
     }
 }

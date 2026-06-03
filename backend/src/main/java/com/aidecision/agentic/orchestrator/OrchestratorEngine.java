@@ -27,6 +27,7 @@ public class OrchestratorEngine {
     private final OrchestratorStepRepository stepRepo;
     private final WorkflowPlannerService planner;
     private final WorkflowExecutor executor;
+    private final WorkflowDagValidator dagValidator;
     private final ToolRegistryService toolRegistry;
     private final QaEvaluationService evaluationService;
     private final OrchestratorProperties props;
@@ -37,6 +38,7 @@ public class OrchestratorEngine {
             OrchestratorStepRepository stepRepo,
             WorkflowPlannerService planner,
             WorkflowExecutor executor,
+            WorkflowDagValidator dagValidator,
             ToolRegistryService toolRegistry,
             QaEvaluationService evaluationService,
             OrchestratorProperties props,
@@ -45,6 +47,7 @@ public class OrchestratorEngine {
         this.stepRepo = stepRepo;
         this.planner = planner;
         this.executor = executor;
+        this.dagValidator = dagValidator;
         this.toolRegistry = toolRegistry;
         this.evaluationService = evaluationService;
         this.props = props;
@@ -74,6 +77,9 @@ public class OrchestratorEngine {
                 case RUNNING -> advanceRun(run);
                 default -> { }
             }
+        } catch (InsufficientToolsException e) {
+            log.warn("Orchestrator insufficient tools for run {}: {}", runId, e.getMessage());
+            failRun(run, formatInsufficientToolsMessage(e));
         } catch (Exception e) {
             log.error("Orchestrator failed run {}", runId, e);
             failRun(run, e.getMessage());
@@ -85,15 +91,37 @@ public class OrchestratorEngine {
         runRepo.save(run);
 
         WorkflowDag dag = planner.plan(run.getQuestion());
+        WorkflowValidationResult validation = dagValidator.validateExecutable(
+                dag, toolRegistry.enabledToolsByName(), true, toolRegistry::hasExecutor);
+        if (!validation.valid()) {
+            throw new IllegalArgumentException("Workflow validation failed: "
+                    + String.join("; ", validation.errors()));
+        }
+
         run.setWorkflowJson(mapper.writeValueAsString(dag));
         persistSteps(run, dag);
 
         run.setStatus(RunStatus.RUNNING.name());
         runRepo.save(run);
 
+        executeSyncWorkflow(run);
+    }
+
+    private void executeSyncWorkflow(OrchestratorRun run) throws Exception {
+        if (!executor.runSyncWorkflowToCompletion(run)) {
+            List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
+            if (steps.stream().anyMatch(s -> StepStatus.FAILED.name().equals(s.getStatus()))) {
+                failRun(run, "One or more workflow steps failed");
+            } else {
+                failRun(run, "Workflow execution deadlock or exceeded retry limit");
+            }
+            return;
+        }
+
         List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
-        executor.markReadySteps(steps);
-        advanceRun(run);
+        if (steps.stream().allMatch(s -> StepStatus.COMPLETED.name().equals(s.getStatus()))) {
+            completeRun(run, steps);
+        }
     }
 
     private void persistSteps(OrchestratorRun run, WorkflowDag dag) throws Exception {
@@ -116,27 +144,7 @@ public class OrchestratorEngine {
     }
 
     private void advanceRun(OrchestratorRun run) throws Exception {
-        List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
-        executor.markReadySteps(steps);
-        steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
-        executor.executeReadySteps(run, steps);
-        steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
-
-        boolean anyFailed = steps.stream().anyMatch(s ->
-                StepStatus.FAILED.name().equals(s.getStatus()) || StepStatus.TIMED_OUT.name().equals(s.getStatus()));
-        if (anyFailed) {
-            failRun(run, "One or more workflow steps failed");
-            return;
-        }
-
-        boolean allDone = steps.stream().allMatch(s -> StepStatus.COMPLETED.name().equals(s.getStatus()));
-        if (allDone) {
-            completeRun(run, steps);
-            return;
-        }
-
-        executor.markReadySteps(steps);
-        runRepo.save(run);
+        executeSyncWorkflow(run);
     }
 
     private void completeRun(OrchestratorRun run, List<OrchestratorStep> steps) throws Exception {
@@ -202,5 +210,12 @@ public class OrchestratorEngine {
     private static String blankToNull(String s) {
         if (s == null || s.isBlank()) return null;
         return s.trim();
+    }
+
+    private static String formatInsufficientToolsMessage(InsufficientToolsException e) {
+        if (e.missingTools().isEmpty()) {
+            return e.getMessage();
+        }
+        return e.getMessage() + " Missing: " + String.join(", ", e.missingTools());
     }
 }

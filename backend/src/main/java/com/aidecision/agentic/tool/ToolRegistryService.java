@@ -1,5 +1,7 @@
 package com.aidecision.agentic.tool;
 
+import com.aidecision.agentic.dto.RegisterToolRequest;
+import com.aidecision.agentic.dto.ToolRegistrationResponse;
 import com.aidecision.agentic.entity.OrchestratorTool;
 import com.aidecision.agentic.repository.OrchestratorToolRepository;
 import jakarta.annotation.PostConstruct;
@@ -21,12 +23,17 @@ public class ToolRegistryService {
 
     private final OrchestratorToolRepository toolRepo;
     private final List<AgentTool> agentTools;
+    private final ToolSchemaConverter schemaConverter;
 
     private Map<String, AgentTool> executorsByName = Map.of();
 
-    public ToolRegistryService(OrchestratorToolRepository toolRepo, List<AgentTool> agentTools) {
+    public ToolRegistryService(
+            OrchestratorToolRepository toolRepo,
+            List<AgentTool> agentTools,
+            ToolSchemaConverter schemaConverter) {
         this.toolRepo = toolRepo;
         this.agentTools = agentTools;
+        this.schemaConverter = schemaConverter;
     }
 
     @PostConstruct
@@ -72,6 +79,7 @@ public class ToolRegistryService {
     private void syncCatalogMetadata(BuiltinToolCatalog.Definition def) {
         OrchestratorTool row = toolRepo.findById(def.name()).orElseThrow();
         row.setVersion(def.version());
+        row.setMaxRetry(def.maxRetry());
         row.setDescription(def.description());
         row.setToolType(def.toolType());
         row.setExecutionMode(def.executionMode());
@@ -86,6 +94,7 @@ public class ToolRegistryService {
         OrchestratorTool row = new OrchestratorTool();
         row.setToolName(def.name());
         row.setVersion(def.version());
+        row.setMaxRetry(def.maxRetry());
         row.setDescription(def.description());
         row.setToolType(def.toolType());
         row.setExecutionMode(def.executionMode());
@@ -97,6 +106,10 @@ public class ToolRegistryService {
 
     public List<OrchestratorTool> listEnabledTools() {
         return toolRepo.findByEnabledTrueOrderByToolNameAsc();
+    }
+
+    public List<ToolRegistrationResponse> listEnabledToolResponses() {
+        return listEnabledTools().stream().map(this::toResponse).toList();
     }
 
     public Map<String, OrchestratorTool> enabledToolsByName() {
@@ -127,6 +140,65 @@ public class ToolRegistryService {
         return tool;
     }
 
+    public boolean hasExecutor(String toolName) {
+        return executorsByName.containsKey(toolName);
+    }
+
+    @Transactional
+    public ToolRegistrationResponse register(RegisterToolRequest request) {
+        return registerOrUpdate(request, false);
+    }
+
+    @Transactional
+    public ToolRegistrationResponse upsert(RegisterToolRequest request) {
+        return registerOrUpdate(request, true);
+    }
+
+    private ToolRegistrationResponse registerOrUpdate(RegisterToolRequest request, boolean allowUpdate) {
+        if (!executorsByName.containsKey(request.name())) {
+            throw new IllegalArgumentException("Cannot register tool without runtime executor: " + request.name());
+        }
+        OrchestratorTool existing = toolRepo.findById(request.name()).orElse(null);
+        if (existing != null && !allowUpdate) {
+            throw new IllegalArgumentException("Tool already exists: " + request.name());
+        }
+
+        OrchestratorTool row = existing != null ? existing : new OrchestratorTool();
+        row.setToolName(request.name());
+        row.setVersion(request.version().trim());
+        row.setMaxRetry(request.maxRetry());
+        row.setDescription(request.description().trim());
+        row.setToolType(request.toolType());
+        row.setExecutionMode(request.executionMode());
+        row.setRequestSchemaJson(schemaConverter.toJsonSchema(request.inputSchema()));
+        row.setResponseSchemaJson(schemaConverter.toJsonSchema(request.outputSchema()));
+        row.setEnabled(request.enabled());
+
+        OrchestratorTool saved = toolRepo.save(row);
+        log.info("{} orchestrator tool: {} v{} (maxRetry={})",
+                existing == null ? "Registered" : "Updated",
+                saved.getToolName(), saved.getVersion(), saved.getMaxRetry());
+        return toResponse(saved);
+    }
+
+    public ToolRegistrationResponse toResponse(OrchestratorTool tool) {
+        return new ToolRegistrationResponse(
+                tool.getToolName(),
+                tool.getVersion(),
+                tool.getMaxRetry(),
+                tool.getDescription(),
+                tool.getToolType(),
+                tool.getExecutionMode(),
+                schemaConverter.fromJsonSchema(tool.getRequestSchemaJson()),
+                schemaConverter.fromJsonSchema(tool.getResponseSchemaJson()),
+                tool.isEnabled(),
+                hasExecutor(tool.getToolName()),
+                tool.getCreatedAt(),
+                tool.getUpdatedAt());
+    }
+
+    /** @deprecated use {@link #register(RegisterToolRequest)} */
+    @Deprecated
     @Transactional
     public OrchestratorTool register(OrchestratorTool tool) {
         if (!executorsByName.containsKey(tool.getToolName())) {

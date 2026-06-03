@@ -4,78 +4,113 @@ import com.aidecision.agentic.config.OrchestratorProperties;
 import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.entity.OrchestratorStep;
 import com.aidecision.agentic.repository.OrchestratorStepRepository;
-import com.aidecision.agentic.tool.AgentTool;
 import com.aidecision.agentic.tool.AsyncAgentTool;
+import com.aidecision.agentic.tool.AgentTool;
 import com.aidecision.agentic.tool.ToolExecutionContext;
 import com.aidecision.agentic.tool.ToolRegistryService;
 import com.aidecision.agentic.tool.ToolResult;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 @Service
 public class WorkflowExecutor {
 
+    private static final Logger log = LoggerFactory.getLogger(WorkflowExecutor.class);
+
     private final OrchestratorStepRepository stepRepo;
     private final ToolRegistryService toolRegistry;
+    private final WorkflowStepRunner stepRunner;
     private final OrchestratorProperties props;
     private final ObjectMapper mapper;
+    private final Executor workflowStepExecutor;
 
     public WorkflowExecutor(
             OrchestratorStepRepository stepRepo,
             ToolRegistryService toolRegistry,
+            WorkflowStepRunner stepRunner,
             OrchestratorProperties props,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            @Qualifier("workflowStepExecutor") Executor workflowStepExecutor) {
         this.stepRepo = stepRepo;
         this.toolRegistry = toolRegistry;
+        this.stepRunner = stepRunner;
         this.props = props;
         this.mapper = mapper;
+        this.workflowStepExecutor = workflowStepExecutor;
     }
 
-    /** Execute all READY steps whose dependencies are COMPLETED; returns true if run may continue. */
-    @Transactional
-    public boolean executeReadySteps(OrchestratorRun run, List<OrchestratorStep> steps) {
-        Map<String, OrchestratorStep> byKey = steps.stream()
-                .collect(Collectors.toMap(OrchestratorStep::getStepKey, s -> s));
-
-        boolean progressed = false;
-        for (OrchestratorStep step : steps) {
-            if (!StepStatus.READY.name().equals(step.getStatus())
-                    && !StepStatus.RUNNING.name().equals(step.getStatus())) {
-                continue;
+    /**
+     * Runs the workflow to completion assuming SYNC tools only.
+     * Steps in the same topological wave execute in parallel.
+     *
+     * @return true if run may continue (not failed); false if a step failed permanently
+     */
+    public boolean runSyncWorkflowToCompletion(OrchestratorRun run) {
+        int maxRounds = props.getMaxStepsPerWorkflow() * 3;
+        for (int round = 0; round < maxRounds; round++) {
+            List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
+            if (steps.isEmpty()) {
+                return true;
+            }
+            if (anyFailed(steps)) {
+                return false;
+            }
+            if (allCompleted(steps)) {
+                return true;
             }
 
-            if (StepStatus.RUNNING.name().equals(step.getStatus())) {
-                if (isTimedOut(step)) {
-                    failStep(step, "Step timed out");
-                    return false;
+            markReadySteps(steps);
+            steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
+
+            List<OrchestratorStep> ready = steps.stream()
+                    .filter(s -> StepStatus.READY.name().equals(s.getStatus()))
+                    .toList();
+
+            if (ready.isEmpty()) {
+                if (anyRunning(steps)) {
+                    log.debug("Run {} waiting on RUNNING steps (async not supported in sync mode)", run.getRunId());
+                    return true;
                 }
-                if (pollAsyncStep(run, step, byKey)) {
-                    progressed = true;
-                }
-                continue;
+                log.error("Run {} deadlock: pending steps but none READY", run.getRunId());
+                return false;
             }
 
-            if (!dependenciesMet(step, byKey)) {
-                continue;
-            }
-
-            progressed = true;
-            runStep(run, step, byKey);
-            if (StepStatus.FAILED.name().equals(step.getStatus())
-                    || StepStatus.TIMED_OUT.name().equals(step.getStatus())) {
+            if (!executeReadyWaveParallel(run, ready)) {
                 return false;
             }
         }
-        return progressed;
+        log.error("Run {} exceeded max workflow execution rounds", run.getRunId());
+        return false;
+    }
+
+    /** @deprecated prefer {@link #runSyncWorkflowToCompletion}; kept for worker single-tick advance */
+    @Transactional
+    public boolean executeReadySteps(OrchestratorRun run, List<OrchestratorStep> steps) {
+        markReadySteps(steps);
+        steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
+        List<OrchestratorStep> ready = steps.stream()
+                .filter(s -> StepStatus.READY.name().equals(s.getStatus()))
+                .toList();
+        if (ready.isEmpty()) {
+            return handleRunningSteps(run, steps);
+        }
+        return executeReadyWaveParallel(run, ready);
     }
 
     @Transactional
@@ -94,6 +129,63 @@ public class WorkflowExecutor {
         }
     }
 
+    boolean executeReadyWaveParallel(OrchestratorRun run, List<OrchestratorStep> readySteps) {
+        List<CompletableFuture<WorkflowStepRunner.StepRunResult>> futures = new ArrayList<>();
+        for (OrchestratorStep step : readySteps) {
+            var toolMeta = toolRegistry.enabledToolsByName().get(step.getToolName());
+            if (toolMeta != null && !"SYNC".equalsIgnoreCase(toolMeta.getExecutionMode())) {
+                failStep(step, "Sync workflow cannot execute ASYNC tool: " + step.getToolName());
+                return false;
+            }
+            UUID stepId = step.getStepId();
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> stepRunner.runSyncStep(run.getRunId(), stepId),
+                    workflowStepExecutor));
+        }
+
+        boolean anyFailed = false;
+        boolean anyRetry = false;
+        for (int i = 0; i < futures.size(); i++) {
+            WorkflowStepRunner.StepRunResult result = futures.get(i).join();
+            if (result.outcome() == WorkflowStepRunner.StepOutcome.FAILED) {
+                anyFailed = true;
+            } else if (result.outcome() == WorkflowStepRunner.StepOutcome.RETRY_READY) {
+                anyRetry = true;
+            } else if (result.outcome() == WorkflowStepRunner.StepOutcome.ASYNC_RUNNING) {
+                OrchestratorStep asyncStep = readySteps.get(i);
+                failStep(asyncStep, "Unexpected ASYNC tool in sync workflow: " + asyncStep.getToolName());
+                return false;
+            }
+        }
+
+        if (anyFailed) {
+            return false;
+        }
+        if (anyRetry) {
+            log.debug("Run {} has steps scheduled for retry", run.getRunId());
+        }
+        return true;
+    }
+
+    private boolean handleRunningSteps(OrchestratorRun run, List<OrchestratorStep> steps) {
+        Map<String, OrchestratorStep> byKey = steps.stream()
+                .collect(Collectors.toMap(OrchestratorStep::getStepKey, s -> s));
+        boolean progressed = false;
+        for (OrchestratorStep step : steps) {
+            if (!StepStatus.RUNNING.name().equals(step.getStatus())) {
+                continue;
+            }
+            if (isTimedOut(step)) {
+                failStep(step, "Step timed out");
+                return false;
+            }
+            if (pollAsyncStep(run, step, byKey)) {
+                progressed = true;
+            }
+        }
+        return progressed;
+    }
+
     private boolean pollAsyncStep(OrchestratorRun run, OrchestratorStep step, Map<String, OrchestratorStep> byKey) {
         AgentTool tool = toolRegistry.requireExecutor(step.getToolName());
         if (!(tool instanceof AsyncAgentTool async)) {
@@ -104,9 +196,7 @@ public class WorkflowExecutor {
             if (prior.isEmpty()) {
                 return false;
             }
-            ToolResult result = async.poll(
-                    buildContext(run, step, byKey),
-                    prior);
+            ToolResult result = async.poll(buildContext(run, step, byKey), prior);
             if (result.asyncPending()) {
                 return false;
             }
@@ -122,45 +212,6 @@ public class WorkflowExecutor {
         } catch (Exception e) {
             failStep(step, e.getMessage());
             return true;
-        }
-    }
-
-    private void runStep(OrchestratorRun run, OrchestratorStep step, Map<String, OrchestratorStep> byKey) {
-        step.setStatus(StepStatus.RUNNING.name());
-        step.setStartedAt(Instant.now());
-        step.setAttemptCount(step.getAttemptCount() + 1);
-        stepRepo.save(step);
-
-        try {
-            Map<String, String> prior = new HashMap<>();
-            List<String> deps = readDeps(step);
-            for (String dep : deps) {
-                OrchestratorStep d = byKey.get(dep);
-                if (d != null && d.getOutputJson() != null) {
-                    prior.put(dep, d.getOutputJson());
-                }
-            }
-
-            Map<String, Object> params = readParams(step);
-            AgentTool tool = toolRegistry.requireExecutor(step.getToolName());
-            ToolResult result = tool.execute(buildContext(run, step, byKey, prior), params);
-
-            if (!result.success()) {
-                failStep(step, result.errorMessage());
-                return;
-            }
-
-            step.setOutputJson(mapper.writeValueAsString(result.output()));
-            if (result.asyncPending()) {
-                step.setFinishedAt(null);
-                step.setStatus(StepStatus.RUNNING.name());
-            } else {
-                step.setFinishedAt(Instant.now());
-                step.setStatus(StepStatus.COMPLETED.name());
-            }
-            stepRepo.save(step);
-        } catch (Exception e) {
-            failStep(step, e.getMessage());
         }
     }
 
@@ -189,6 +240,20 @@ public class WorkflowExecutor {
         stepRepo.save(step);
     }
 
+    private static boolean allCompleted(List<OrchestratorStep> steps) {
+        return steps.stream().allMatch(s -> StepStatus.COMPLETED.name().equals(s.getStatus()));
+    }
+
+    private static boolean anyFailed(List<OrchestratorStep> steps) {
+        return steps.stream().anyMatch(s ->
+                StepStatus.FAILED.name().equals(s.getStatus())
+                        || StepStatus.TIMED_OUT.name().equals(s.getStatus()));
+    }
+
+    private static boolean anyRunning(List<OrchestratorStep> steps) {
+        return steps.stream().anyMatch(s -> StepStatus.RUNNING.name().equals(s.getStatus()));
+    }
+
     private List<String> readDeps(OrchestratorStep step) {
         try {
             if (step.getDependsOnJson() == null || step.getDependsOnJson().isBlank()) {
@@ -202,18 +267,6 @@ public class WorkflowExecutor {
 
     private ToolExecutionContext buildContext(
             OrchestratorRun run, OrchestratorStep step, Map<String, OrchestratorStep> byKey) {
-        return buildContext(run, step, byKey, collectPriorOutputs(step, byKey));
-    }
-
-    private ToolExecutionContext buildContext(
-            OrchestratorRun run,
-            OrchestratorStep step,
-            Map<String, OrchestratorStep> byKey,
-            Map<String, String> prior) {
-        return new ToolExecutionContext(run.getRunId(), step.getStepKey(), run.getQuestion(), prior);
-    }
-
-    private Map<String, String> collectPriorOutputs(OrchestratorStep step, Map<String, OrchestratorStep> byKey) {
         Map<String, String> prior = new HashMap<>();
         for (String dep : readDeps(step)) {
             OrchestratorStep d = byKey.get(dep);
@@ -221,7 +274,7 @@ public class WorkflowExecutor {
                 prior.put(dep, d.getOutputJson());
             }
         }
-        return prior;
+        return new ToolExecutionContext(run.getRunId(), step.getStepKey(), run.getQuestion(), prior);
     }
 
     private Map<String, Object> readOutputMap(OrchestratorStep step) {
@@ -230,17 +283,6 @@ public class WorkflowExecutor {
                 return Map.of();
             }
             return mapper.readValue(step.getOutputJson(), new TypeReference<Map<String, Object>>() {});
-        } catch (Exception e) {
-            return Map.of();
-        }
-    }
-
-    private Map<String, Object> readParams(OrchestratorStep step) {
-        try {
-            if (step.getInputJson() == null || step.getInputJson().isBlank()) {
-                return Map.of();
-            }
-            return mapper.readValue(step.getInputJson(), new TypeReference<Map<String, Object>>() {});
         } catch (Exception e) {
             return Map.of();
         }

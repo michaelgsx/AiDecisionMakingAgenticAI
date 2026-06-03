@@ -63,7 +63,7 @@ class WorkflowDiagramServiceTest {
                 null,
                 null,
                 List.of(new RunStatusResponse.StepStatusDto(
-                        UUID.randomUUID().toString(), "s1", "data_acquisition", "1.1.0", "RUNNING", null, 1)),
+                        UUID.randomUUID().toString(), "s1", "data_acquisition", "1.1.0", "RUNNING", null, 1, null)),
                 false,
                 List.of(),
                 false,

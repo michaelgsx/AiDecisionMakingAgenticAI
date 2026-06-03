@@ -35,7 +35,8 @@ public record RunStatusResponse(
             String toolVersion,
             String status,
             String error,
-            Integer attemptCount
+            Integer attemptCount,
+            String outputJson
     ) {}
 
     public String pollPath() {
