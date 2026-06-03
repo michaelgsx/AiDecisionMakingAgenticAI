@@ -1,12 +1,12 @@
 # Deploy Spring Boot agentic API to Azure App Service (ai-rag-agentic-ai).
-# Same Service Principal pattern as AiDecisionMakingBackend deploy-backend.yml.
+# Same pattern as AiDecisionMakingBackend deploy-backend.yml.
 #
 # --- GitHub → Settings → Secrets and variables → Actions ---
 #
 # Secrets (required):
 #   AZURE_CREDENTIALS
 #     JSON: { "clientId", "clientSecret", "tenantId", "subscriptionId" }
-#     Use the SAME secret as AiDecisionMakingBackend (SP needs Contributor on ai-rag-rg-1).
+#     SP needs Website Contributor on ai-rag-agentic-ai (same as ai-rag-webapp).
 #
 # App Service → Configuration (Portal; not in git):
 #   SPRING_DATASOURCE_* / AZURE_SQL_*
@@ -60,25 +60,24 @@ jobs:
         run: |
           set -euo pipefail
           az account set --subscription "${{ env.AZURE_SUBSCRIPTION_ID }}"
-          echo "Active subscription:"
-          az account show --query "{name:name, id:id}" -o tsv
-          echo "Target web app:"
           az webapp show \
             --name "${{ env.AZURE_WEBAPP_NAME }}" \
             --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --query "{name:name, state:state, host:defaultHostName}" -o json
+            --query "{name:name, state:state, host:defaultHostName, startup:siteConfig.appCommandLine}" -o json
 
-      - name: Deploy JAR to Azure App Service
+      - name: Clear custom startup command (Java SE auto-detects app.jar)
         run: |
           set -euo pipefail
-          JAR=$(ls backend/target/*.jar | head -1)
-          echo "Deploying $JAR to ${{ env.AZURE_WEBAPP_NAME }}"
-          az webapp deploy \
-            --resource-group "${{ env.AZURE_RESOURCE_GROUP }}" \
-            --name "${{ env.AZURE_WEBAPP_NAME }}" \
-            --src-path "$JAR" \
-            --type jar \
-            --async false
+          az rest --method PATCH \
+            --url "/subscriptions/${{ env.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ env.AZURE_RESOURCE_GROUP }}/providers/Microsoft.Web/sites/${{ env.AZURE_WEBAPP_NAME }}/config/web?api-version=2023-12-01" \
+            --body '{"properties":{"appCommandLine":""}}'
+
+      - name: Deploy JAR to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          resource-group-name: ${{ env.AZURE_RESOURCE_GROUP }}
+          package: backend/target/*.jar
 
       - name: Azure logout
         if: always()
