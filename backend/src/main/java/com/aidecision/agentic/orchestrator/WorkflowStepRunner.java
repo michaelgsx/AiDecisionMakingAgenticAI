@@ -56,8 +56,10 @@ public class WorkflowStepRunner {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public StepRunResult runSyncStep(UUID runId, UUID stepId) {
-        OrchestratorRun run = runRepo.findById(runId).orElseThrow();
-        OrchestratorStep step = stepRepo.findById(stepId).orElseThrow();
+        OrchestratorRun run = runRepo.findById(runId)
+                .orElseThrow(() -> new IllegalStateException("Run not found (not yet committed?): " + runId));
+        OrchestratorStep step = stepRepo.findById(stepId)
+                .orElseThrow(() -> new IllegalStateException("Step not found (not yet committed?): " + stepId));
         Map<String, OrchestratorStep> stepsByKey = stepRepo.findByRunIdOrderByCreatedAtAsc(runId).stream()
                 .collect(java.util.stream.Collectors.toMap(OrchestratorStep::getStepKey, s -> s, (a, b) -> a));
 

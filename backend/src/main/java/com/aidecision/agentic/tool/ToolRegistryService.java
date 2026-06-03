@@ -58,8 +58,9 @@ public class ToolRegistryService {
                 skipped++;
                 continue;
             }
-            if (toolRepo.existsById(def.name())) {
-                syncCatalogMetadata(def);
+            OrchestratorTool existing = toolRepo.findById(def.name()).orElse(null);
+            if (existing != null) {
+                syncCatalogMetadata(def, existing);
                 updated++;
             } else if (insertTool(def)) {
                 inserted++;
@@ -76,8 +77,7 @@ public class ToolRegistryService {
         return true;
     }
 
-    private void syncCatalogMetadata(BuiltinToolCatalog.Definition def) {
-        OrchestratorTool row = toolRepo.findById(def.name()).orElseThrow();
+    private void syncCatalogMetadata(BuiltinToolCatalog.Definition def, OrchestratorTool row) {
         row.setVersion(def.version());
         row.setMaxRetry(def.maxRetry());
         row.setDescription(def.description());

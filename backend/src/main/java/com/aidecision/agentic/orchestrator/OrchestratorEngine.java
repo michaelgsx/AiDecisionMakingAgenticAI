@@ -81,8 +81,11 @@ public class OrchestratorEngine {
         try {
             log.debug("Run {} processRun status={}", runId, run.getStatus());
             switch (RunStatus.valueOf(run.getStatus())) {
-                case PENDING -> planAndStart(run);
-                case RUNNING -> advanceRun(run);
+                case PENDING -> {
+                    planAndPersistWorkflow(run);
+                    executeRunningWorkflow(run.getRunId());
+                }
+                case RUNNING -> executeRunningWorkflow(run.getRunId());
                 default -> { }
             }
         } catch (InsufficientToolsException e) {
@@ -94,8 +97,13 @@ public class OrchestratorEngine {
         }
     }
 
-    private void planAndStart(OrchestratorRun run) throws Exception {
-        log.info("Run {} planAndStart question={}", run.getRunId(), LogSanitizer.question(run.getQuestion()));
+    /**
+     * Plans workflow and persists run + steps. Commits before execution so parallel step workers
+     * ({@link WorkflowStepRunner} REQUIRES_NEW) can load rows from the database.
+     */
+    @Transactional
+    public void planAndPersistWorkflow(OrchestratorRun run) throws Exception {
+        log.info("Run {} planAndPersistWorkflow question={}", run.getRunId(), LogSanitizer.question(run.getQuestion()));
         run.setStatus(RunStatus.PLANNING.name());
         runRepo.save(run);
 
@@ -116,7 +124,12 @@ public class OrchestratorEngine {
 
         run.setStatus(RunStatus.RUNNING.name());
         runRepo.save(run);
+    }
 
+    /** Executes workflow steps after {@link #planAndPersistWorkflow} has committed. */
+    public void executeRunningWorkflow(UUID runId) throws Exception {
+        OrchestratorRun run = runRepo.findById(runId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown runId: " + runId));
         executeSyncWorkflow(run);
     }
 
@@ -161,10 +174,6 @@ public class OrchestratorEngine {
         }
     }
 
-    private void advanceRun(OrchestratorRun run) throws Exception {
-        executeSyncWorkflow(run);
-    }
-
     private void completeRun(OrchestratorRun run, List<OrchestratorStep> steps) throws Exception {
         String answer = extractFinalAnswer(steps);
         run.setAnswerText(answer);
@@ -199,12 +208,17 @@ public class OrchestratorEngine {
                 .collect(Collectors.joining("\n\n"));
     }
 
-    @Transactional
     public void resumeRun(OrchestratorRun run) throws Exception {
         if (run.getWorkflowJson() == null || run.getWorkflowJson().isBlank()) {
-            planAndStart(run);
-            return;
+            planAndPersistWorkflow(run);
+        } else {
+            resetFailedStepsForResume(run);
         }
+        executeRunningWorkflow(run.getRunId());
+    }
+
+    @Transactional
+    protected void resetFailedStepsForResume(OrchestratorRun run) {
         run.setStatus(RunStatus.RUNNING.name());
         run.setErrorMessage(null);
         runRepo.save(run);
@@ -220,7 +234,6 @@ public class OrchestratorEngine {
                 stepRepo.save(step);
             }
         }
-        advanceRun(run);
     }
 
     private void failRun(OrchestratorRun run, String message) {
