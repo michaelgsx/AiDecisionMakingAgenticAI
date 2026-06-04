@@ -6,7 +6,29 @@ Companion UI: **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisi
 
 > **Synthetic data:** Schema catalog text, seed risk rows, and demo evaluations are AI-generated for development only.
 
-UI screenshots live in **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisionMakingQAFront)** README (Chat and Evaluation tabs).
+## Screenshots
+
+The companion **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisionMakingQAFront)** UI drives this orchestrator. A `user-001` lookup below is planned and executed end-to-end (`data_acquisition` → `llm_answer`).
+
+### Ask a question
+
+`POST /agent/ask` → the planner builds a DAG, the worker runs the tools, and `llm_answer` produces the final text.
+
+![Chat answer — user-001 lookup](docs/screenshots/chat-answer.png)
+
+### Workflow output (steps + DAG)
+
+Each `orchestrator_step` status, the Mermaid **Workflow DAG** from `orchestrator_run.workflow_json`, and 👍 / 👎 feedback (`POST /agent/feedback`).
+
+![Workflow output — orchestrator steps and DAG](docs/screenshots/workflow-output.png)
+
+### Companion UI tabs and chat modes
+
+Chat / Evaluation / Tools tabs, and Sync (`/agent/ask` + run polling) vs Async (`/agent/async-chat` + status polling) chat modes.
+
+![Navigation tabs — Chat / Evaluation / Tools](docs/screenshots/nav-tabs.png)
+
+![Chat mode toggle — Sync / Async](docs/screenshots/chat-mode-toggle.png)
 
 ## What it does
 
