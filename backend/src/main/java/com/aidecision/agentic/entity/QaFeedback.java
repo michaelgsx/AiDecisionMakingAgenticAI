@@ -20,7 +20,9 @@ public class QaFeedback {
     @Column(name = "conversation_id", columnDefinition = "uniqueidentifier")
     private UUID conversationId;
 
-    @Column(name = "message_id", nullable = false, columnDefinition = "uniqueidentifier")
+    // Orchestrator answers are not qa_message rows; the FK was relaxed in V18 so feedback can
+    // reference an orchestrator run (run_id) using the runId as message_id.
+    @Column(name = "message_id", columnDefinition = "uniqueidentifier")
     private UUID messageId;
 
     @Column(name = "run_id", columnDefinition = "uniqueidentifier")
