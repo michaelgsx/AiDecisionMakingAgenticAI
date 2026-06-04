@@ -39,6 +39,30 @@ public class AsyncChatStatusService {
         return saved;
     }
 
+    /**
+     * Ensure a status row exists for a run created outside the async-chat path (e.g. sync
+     * {@code /agent/ask} or {@code /agent/execute}). Idempotent: if a row is already linked to the
+     * run it is returned unchanged, so the markPlanning/markStepStarted/markDone updates (keyed by
+     * runId) drive the same detailed status table for sync calls as for async calls.
+     */
+    @Transactional
+    public AsyncChatStatus ensureForRun(UUID runId, String question, UUID conversationId, String userId) {
+        Optional<AsyncChatStatus> existing = repo.findByRunId(runId);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        AsyncChatStatus row = new AsyncChatStatus();
+        row.setQuestion(question == null ? "" : question.trim());
+        row.setConversationId(conversationId);
+        row.setUserId(blankToNull(userId));
+        row.setRunId(runId);
+        row.setStatus(AsyncChatPhase.PLANNING.name());
+        row.setStatusDetail("planning");
+        AsyncChatStatus saved = repo.save(row);
+        log.info("Status row {} created for run {} (sync path)", saved.getRequestId(), runId);
+        return saved;
+    }
+
     @Transactional
     public void linkRun(UUID requestId, UUID runId) {
         AsyncChatStatus row = repo.findById(requestId)

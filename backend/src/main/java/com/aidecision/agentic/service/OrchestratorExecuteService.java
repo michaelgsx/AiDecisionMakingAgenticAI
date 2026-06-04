@@ -38,6 +38,7 @@ public class OrchestratorExecuteService {
     private final OrchestratorRunAssembler assembler;
     private final HumanInLoopService humanInLoop;
     private final ToolRegistryService toolRegistry;
+    private final AsyncChatStatusService asyncChatStatus;
     private final ObjectMapper mapper;
 
     public OrchestratorExecuteService(
@@ -47,6 +48,7 @@ public class OrchestratorExecuteService {
             OrchestratorRunAssembler assembler,
             HumanInLoopService humanInLoop,
             ToolRegistryService toolRegistry,
+            AsyncChatStatusService asyncChatStatus,
             ObjectMapper mapper) {
         this.engine = engine;
         this.runRepo = runRepo;
@@ -54,6 +56,7 @@ public class OrchestratorExecuteService {
         this.assembler = assembler;
         this.humanInLoop = humanInLoop;
         this.toolRegistry = toolRegistry;
+        this.asyncChatStatus = asyncChatStatus;
         this.mapper = mapper;
     }
 
@@ -67,6 +70,7 @@ public class OrchestratorExecuteService {
 
         UUID conversationId = parseUuid(request.conversationId());
         OrchestratorRun run = engine.submitQuestion(request.question(), conversationId, request.userId());
+        asyncChatStatus.ensureForRun(run.getRunId(), request.question(), conversationId, request.userId());
         if (request.transactionId() != null && !request.transactionId().isBlank()) {
             storeTransactionId(run, request.transactionId().trim());
         }

@@ -13,6 +13,7 @@ import com.aidecision.agentic.dto.RunStatusResponse;
 import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.orchestrator.OrchestratorEngine;
 import com.aidecision.agentic.service.AsyncChatService;
+import com.aidecision.agentic.service.AsyncChatStatusService;
 import com.aidecision.agentic.service.OrchestratorExecuteService;
 import com.aidecision.agentic.service.OrchestratorQueryService;
 import jakarta.validation.Valid;
@@ -33,16 +34,19 @@ public class OrchestratorController {
     private final OrchestratorQueryService query;
     private final OrchestratorExecuteService executeService;
     private final AsyncChatService asyncChatService;
+    private final AsyncChatStatusService asyncChatStatus;
 
     public OrchestratorController(
             OrchestratorEngine engine,
             OrchestratorQueryService query,
             OrchestratorExecuteService executeService,
-            AsyncChatService asyncChatService) {
+            AsyncChatService asyncChatService,
+            AsyncChatStatusService asyncChatStatus) {
         this.engine = engine;
         this.query = query;
         this.executeService = executeService;
         this.asyncChatService = asyncChatService;
+        this.asyncChatStatus = asyncChatStatus;
     }
 
     /** Submit question; poll {@code GET /agent/runs/{runId}} until complete or async pending. */
@@ -50,6 +54,7 @@ public class OrchestratorController {
     public AskResponse ask(@Valid @RequestBody AskRequest request) {
         UUID conversationId = parseUuid(request.conversationId());
         OrchestratorRun run = engine.submitQuestion(request.question(), conversationId, request.userId());
+        asyncChatStatus.ensureForRun(run.getRunId(), request.question(), conversationId, request.userId());
         return new AskResponse(
                 run.getRunId().toString(),
                 run.getStatus(),
