@@ -11,6 +11,7 @@ public record ExecuteResponse(
         String runId,
         String workflowId,
         String status,
+        String statusDetail,
         boolean completed,
         boolean waitingForAsync,
         String question,

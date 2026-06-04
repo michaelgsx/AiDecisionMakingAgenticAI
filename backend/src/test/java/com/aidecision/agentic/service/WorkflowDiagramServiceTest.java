@@ -55,6 +55,7 @@ class WorkflowDiagramServiceTest {
         RunStatusResponse run = new RunStatusResponse(
                 UUID.randomUUID().toString(),
                 "RUNNING",
+                "executing/s1/data_acquisition",
                 "q",
                 null,
                 null,

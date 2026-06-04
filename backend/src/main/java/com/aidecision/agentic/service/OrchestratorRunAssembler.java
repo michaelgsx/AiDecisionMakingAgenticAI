@@ -45,6 +45,8 @@ public class OrchestratorRunAssembler {
                 .map(this::toStepDto)
                 .toList();
 
+        String statusDetail = deriveStatusDetail(run.getStatus(), steps);
+
         List<PendingAsyncDto> pendingAsync = buildPendingAsync(run, steps);
         List<RunStatusResponse.HumanApprovalDto> approvals = pendingAsync.stream()
                 .filter(p -> AsyncToolKind.INPUT_REQUIRED.name().equals(p.asyncKind()))
@@ -58,6 +60,7 @@ public class OrchestratorRunAssembler {
             RunStatusResponse forDiagram = new RunStatusResponse(
                     run.getRunId().toString(),
                     run.getStatus(),
+                    statusDetail,
                     run.getQuestion(),
                     run.getAnswerText(),
                     run.getErrorMessage(),
@@ -77,6 +80,7 @@ public class OrchestratorRunAssembler {
         return new RunStatusResponse(
                 run.getRunId().toString(),
                 run.getStatus(),
+                statusDetail,
                 run.getQuestion(),
                 run.getAnswerText(),
                 run.getErrorMessage(),
@@ -98,6 +102,7 @@ public class OrchestratorRunAssembler {
                 status.runId(),
                 status.runId(),
                 status.status(),
+                status.statusDetail(),
                 completed,
                 status.waitingForAsync(),
                 status.question(),
@@ -111,6 +116,45 @@ public class OrchestratorRunAssembler {
                 status.pendingAsync(),
                 status.pollPath(),
                 status.feedbackPath());
+    }
+
+    /**
+     * Fine-grained phase for clients to display while polling. Mirrors the async-chat vocabulary
+     * (planning, executing/{stepKey}/{toolName}, llm-answering, done, failed) so the frontend can
+     * render the same detailed progress for both the sync (run polling) and async paths.
+     */
+    private static String deriveStatusDetail(String status, List<OrchestratorStep> steps) {
+        if (RunStatus.COMPLETED.name().equals(status)) {
+            return "done";
+        }
+        if (RunStatus.FAILED.name().equals(status)) {
+            return "failed";
+        }
+        if (RunStatus.CANCELLED.name().equals(status)) {
+            return "cancelled";
+        }
+        if (RunStatus.PENDING.name().equals(status)) {
+            return "queued";
+        }
+        if (RunStatus.PLANNING.name().equals(status)) {
+            return "planning";
+        }
+        OrchestratorStep running = steps.stream()
+                .filter(s -> StepStatus.RUNNING.name().equals(s.getStatus()))
+                .findFirst()
+                .orElse(null);
+        if (running != null) {
+            if ("llm_answer".equals(running.getToolName())) {
+                return "llm-answering";
+            }
+            return "executing/" + running.getStepKey() + "/" + running.getToolName();
+        }
+        if (RunStatus.WAITING_ASYNC.name().equals(status)) {
+            return "waiting";
+        }
+        boolean anyCompleted = steps.stream()
+                .anyMatch(s -> StepStatus.COMPLETED.name().equals(s.getStatus()));
+        return anyCompleted ? "executing" : "planning";
     }
 
     private RunStatusResponse.RunPaths paths(UUID runId) {

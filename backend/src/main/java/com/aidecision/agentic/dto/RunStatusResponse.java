@@ -5,6 +5,8 @@ import java.util.List;
 public record RunStatusResponse(
         String runId,
         String status,
+        /** Fine-grained phase: planning, executing/{stepKey}/{toolName}, llm-answering, done, failed, queued, waiting. */
+        String statusDetail,
         String question,
         String answer,
         String error,
