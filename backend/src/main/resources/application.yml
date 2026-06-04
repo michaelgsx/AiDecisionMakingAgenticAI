@@ -9,13 +9,29 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME:${AZURE_SQL_USER:}}
     password: ${SPRING_DATASOURCE_PASSWORD:${AZURE_SQL_PASSWORD:}}
     driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+    hikari:
+      # The executor invokes tools over HTTP loopback, so a single step transiently holds the
+      # step's own connection plus the connection the in-app tool endpoint uses. Size the pool
+      # for that doubling and fail fast (rather than hang) if a connection cannot be acquired.
+      maximum-pool-size: ${DB_MAX_POOL_SIZE:20}
+      minimum-idle: ${DB_MIN_IDLE:2}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:20000}
+      max-lifetime: ${DB_MAX_LIFETIME_MS:1200000}
   jpa:
+    # Disabled: open-in-view keeps an EntityManager (and its DB connection) bound to every request
+    # for its full duration. With loopback tool HTTP calls that needlessly pins connections and can
+    # starve the orchestrator's scheduler thread; we never lazy-load outside a transaction.
+    open-in-view: false
     hibernate:
       ddl-auto: validate
     show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.SQLServerDialect
+        # Cap every JDBC statement (seconds). A loopback tool step holds its row lock across the
+        # HTTP call, so an unlucky reader could otherwise block forever; instead it fails and retries.
+        jdbc:
+          timeout: ${DB_STATEMENT_TIMEOUT_SEC:45}
 
 app:
   ops-token: ${OPS_TOKEN:}
@@ -29,6 +45,8 @@ app:
     worker-poll-interval-ms: 2000
     default-step-max-time-ms: 30000
     default-step-timeout-ms: 120000
+    invoke-tools-over-http: ${ORCH_INVOKE_TOOLS_OVER_HTTP:true}
+    tool-base-url: ${ORCH_TOOL_BASE_URL:http://localhost:${PORT:8788}}
   azure-openai:
     endpoint: ${AZURE_OPENAI_ENDPOINT:}
     api-key: ${AZURE_OPENAI_API_KEY:}

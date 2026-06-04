@@ -2,6 +2,7 @@ package com.aidecision.agentic.orchestrator;
 
 import com.aidecision.agentic.config.OrchestratorProperties;
 import com.aidecision.agentic.entity.OrchestratorTool;
+import com.aidecision.agentic.service.SchemaCatalogService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -21,10 +22,13 @@ import java.util.Map;
 public class WorkflowPlannerPromptBuilder {
 
     private final OrchestratorProperties orchProps;
+    private final SchemaCatalogService schemaCatalog;
     private final ObjectMapper mapper;
 
-    public WorkflowPlannerPromptBuilder(OrchestratorProperties orchProps, ObjectMapper mapper) {
+    public WorkflowPlannerPromptBuilder(
+            OrchestratorProperties orchProps, SchemaCatalogService schemaCatalog, ObjectMapper mapper) {
         this.orchProps = orchProps;
+        this.schemaCatalog = schemaCatalog;
         this.mapper = mapper;
     }
 
@@ -52,6 +56,13 @@ public class WorkflowPlannerPromptBuilder {
                 "insufficient_tools", explain what capability is missing in message, and list each gap \
                 in missingTools (e.g. "payment_history_lookup", "real_time_fraud_score_api").
 
+                IMPORTANT — do NOT refuse data lookups that the catalog can serve: the \
+                data_acquisition tool generates read-only SQL over the SQL data catalog listed in the \
+                user message. Looking up or showing a specific user, account, transaction, device, or \
+                record by id or attribute (e.g. "show me the information of user-001") IS supported \
+                whenever a catalog table contains the relevant column. For such requests use \
+                data_acquisition (then llm_answer) and DO NOT return insufficient_tools.
+
                 When status is "ok":
                 - Output ONLY valid JSON matching outputJsonSchema (no markdown, no commentary).
                 - Use ONLY tool names from tools[] in the user message.
@@ -73,6 +84,7 @@ public class WorkflowPlannerPromptBuilder {
     String buildUserPrompt(String question, Map<String, OrchestratorTool> tools, String outputJsonSchema)
             throws Exception {
         String toolsJson = buildToolsJson(tools);
+        String catalogIndex = safeCatalogIndex();
         return """
                 ## 1. User question
                 %s
@@ -80,11 +92,24 @@ public class WorkflowPlannerPromptBuilder {
                 ## 2. Available tools (use ONLY these; each includes requestSchema and responseSchema)
                 %s
 
-                ## 3. Required output JSON schema
+                ## 3. SQL data catalog (tables reachable via data_acquisition / natural_language_to_sql)
+                Use this to decide whether data_acquisition can answer the question; if a relevant \
+                table exists, plan data_acquisition instead of refusing.
+                %s
+
+                ## 4. Required output JSON schema
                 Respond with a single JSON object that conforms to this schema:
                 %s
                 """
-                .formatted(question == null ? "" : question.trim(), toolsJson, outputJsonSchema);
+                .formatted(question == null ? "" : question.trim(), toolsJson, catalogIndex, outputJsonSchema);
+    }
+
+    private String safeCatalogIndex() {
+        try {
+            return schemaCatalog.buildTableIndexText(null);
+        } catch (Exception e) {
+            return "(schema catalog unavailable)";
+        }
     }
 
     String buildOutputJsonSchema() throws Exception {
@@ -156,6 +181,9 @@ public class WorkflowPlannerPromptBuilder {
                     row.put("toolType", t.getToolType());
                     row.put("executionMode", t.getExecutionMode());
                     row.put("description", t.getDescription());
+                    if (t.getEndpointUrl() != null && !t.getEndpointUrl().isBlank()) {
+                        row.put("endpointUrl", t.getEndpointUrl());
+                    }
                     row.set("requestSchema", parseSchemaNode(t.getRequestSchemaJson()));
                     row.set("responseSchema", parseSchemaNode(t.getResponseSchemaJson()));
                 });

@@ -104,6 +104,7 @@ class ToolRegistryServiceTest {
                                 "rowCount",
                                 "integer",
                                 "Number of rows returned."))),
+                "/agent/tools/data_acquisition/1.1.0/execute",
                 true);
     }
 

@@ -12,6 +12,7 @@ public record ToolRegistrationResponse(
         String executionMode,
         ToolSchemaDto inputSchema,
         ToolSchemaDto outputSchema,
+        String endpointUrl,
         boolean enabled,
         boolean executorAvailable,
         Instant createdAt,

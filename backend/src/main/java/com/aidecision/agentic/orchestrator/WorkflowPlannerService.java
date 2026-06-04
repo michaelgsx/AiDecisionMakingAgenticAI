@@ -129,8 +129,7 @@ public class WorkflowPlannerService {
                 + "/chat/completions?api-version=" + openAi.getEffectiveChatApiVersion());
 
         ObjectNode root = mapper.createObjectNode();
-        root.put("temperature", 0.1);
-        root.put("max_tokens", 4096);
+        root.put("max_completion_tokens", 4096);
         root.set("response_format", mapper.createObjectNode().put("type", "json_object"));
         ArrayNode messages = root.putArray("messages");
         messages.addObject().put("role", "system").put("content", systemPrompt);

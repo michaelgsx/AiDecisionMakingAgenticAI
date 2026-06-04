@@ -12,6 +12,12 @@ public class OrchestratorProperties {
     private long defaultStepTimeoutMs = 120_000;
     private long maxRunAgeMs = 3_600_000;
 
+    /** When true, the executor invokes each tool over HTTP at its registered endpointUrl. */
+    private boolean invokeToolsOverHttp = true;
+
+    /** Base URL prepended to a tool's relative endpointUrl; defaults to this app on localhost. */
+    private String toolBaseUrl = "";
+
     public int getMaxStepsPerWorkflow() { return maxStepsPerWorkflow; }
     public void setMaxStepsPerWorkflow(int maxStepsPerWorkflow) { this.maxStepsPerWorkflow = maxStepsPerWorkflow; }
 
@@ -29,4 +35,10 @@ public class OrchestratorProperties {
 
     public long getMaxRunAgeMs() { return maxRunAgeMs; }
     public void setMaxRunAgeMs(long maxRunAgeMs) { this.maxRunAgeMs = maxRunAgeMs; }
+
+    public boolean isInvokeToolsOverHttp() { return invokeToolsOverHttp; }
+    public void setInvokeToolsOverHttp(boolean invokeToolsOverHttp) { this.invokeToolsOverHttp = invokeToolsOverHttp; }
+
+    public String getToolBaseUrl() { return toolBaseUrl; }
+    public void setToolBaseUrl(String toolBaseUrl) { this.toolBaseUrl = toolBaseUrl; }
 }

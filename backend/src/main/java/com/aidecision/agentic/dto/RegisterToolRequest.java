@@ -22,5 +22,6 @@ public record RegisterToolRequest(
         @NotBlank @Pattern(regexp = "SYNC|ASYNC") String executionMode,
         @NotNull @Valid ToolSchemaDto inputSchema,
         @NotNull @Valid ToolSchemaDto outputSchema,
+        @Size(max = 256) String endpointUrl,
         boolean enabled
 ) {}

@@ -1,11 +1,12 @@
 package com.aidecision.agentic.orchestrator;
 
+import com.aidecision.agentic.config.OrchestratorProperties;
 import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.entity.OrchestratorStep;
 import com.aidecision.agentic.repository.OrchestratorRunRepository;
 import com.aidecision.agentic.repository.OrchestratorStepRepository;
 import com.aidecision.agentic.service.AsyncChatStatusService;
-import com.aidecision.agentic.tool.AgentTool;
+import com.aidecision.agentic.tool.HttpToolInvoker;
 import com.aidecision.agentic.tool.ToolExecutionContext;
 import com.aidecision.agentic.tool.ToolRegistryService;
 import com.aidecision.agentic.tool.ToolResult;
@@ -34,19 +35,28 @@ public class WorkflowStepRunner {
     private final OrchestratorStepRepository stepRepo;
     private final ToolRegistryService toolRegistry;
     private final AsyncChatStatusService asyncChatStatus;
+    private final HttpToolInvoker httpToolInvoker;
+    private final OrchestratorProperties props;
     private final ObjectMapper mapper;
+    private final WorkflowStepRunner self;
 
     public WorkflowStepRunner(
             OrchestratorRunRepository runRepo,
             OrchestratorStepRepository stepRepo,
             ToolRegistryService toolRegistry,
             AsyncChatStatusService asyncChatStatus,
-            ObjectMapper mapper) {
+            HttpToolInvoker httpToolInvoker,
+            OrchestratorProperties props,
+            ObjectMapper mapper,
+            @org.springframework.context.annotation.Lazy WorkflowStepRunner self) {
         this.runRepo = runRepo;
         this.stepRepo = stepRepo;
         this.toolRegistry = toolRegistry;
         this.asyncChatStatus = asyncChatStatus;
+        this.httpToolInvoker = httpToolInvoker;
+        this.props = props;
         this.mapper = mapper;
+        this.self = self;
     }
 
     public enum StepOutcome {
@@ -58,12 +68,47 @@ public class WorkflowStepRunner {
 
     public record StepRunResult(StepOutcome outcome, String errorMessage) {}
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    /** Data captured from the DB while marking a step RUNNING, used to invoke the tool with no tx held. */
+    private record StepInvocation(
+            String stepKey,
+            String toolName,
+            String question,
+            Map<String, Object> params,
+            Map<String, String> priorOutputs) {}
+
+    /**
+     * Runs one step in three phases so that NO database transaction (and therefore no row lock) is
+     * held while the tool executes over HTTP: (1) mark RUNNING and commit, (2) invoke the tool with
+     * no transaction open, (3) persist the outcome in a fresh transaction. Holding a lock across the
+     * blocking loopback HTTP call could otherwise stall the orchestrator's reader threads.
+     */
     public StepRunResult runSyncStep(UUID runId, UUID stepId) {
-        OrchestratorRun run = runRepo.findById(runId)
-                .orElseThrow(() -> new IllegalStateException("Run not found (not yet committed?): " + runId));
-        OrchestratorStep step = stepRepo.findById(stepId)
-                .orElseThrow(() -> new IllegalStateException("Step not found (not yet committed?): " + stepId));
+        StepInvocation inv = self.beginStep(runId, stepId);
+
+        ToolExecutionContext ctx =
+                new ToolExecutionContext(runId, inv.stepKey(), inv.question(), inv.priorOutputs());
+        ToolResult result;
+        try {
+            result = invokeTool(inv.toolName(), ctx, inv.params());
+        } catch (Exception e) {
+            log.warn("Run {} step {} tool {} failed: {}",
+                    runId, inv.stepKey(), inv.toolName(), LogSanitizer.message(e.getMessage()));
+            result = ToolResult.fail(e.getMessage());
+        }
+
+        return self.finishStep(runId, stepId, result);
+    }
+
+    /** Phase 1: claim the step (RUNNING, attempt++) and snapshot what the tool needs. Commits fast. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public StepInvocation beginStep(UUID runId, UUID stepId) {
+        // The planning transaction commits run + steps just before this REQUIRES_NEW worker runs.
+        // Under load that commit can be momentarily invisible to this fresh transaction, so re-query
+        // a few times (READ_COMMITTED sees newer commits on each statement) before giving up.
+        OrchestratorRun run = loadWithRetry(() -> runRepo.findById(runId).orElse(null),
+                "Run not found (not yet committed?): " + runId);
+        OrchestratorStep step = loadWithRetry(() -> stepRepo.findById(stepId).orElse(null),
+                "Step not found (not yet committed?): " + stepId);
         Map<String, OrchestratorStep> stepsByKey = stepRepo.findByRunIdOrderByCreatedAtAsc(runId).stream()
                 .collect(java.util.stream.Collectors.toMap(OrchestratorStep::getStepKey, s -> s, (a, b) -> a));
 
@@ -79,14 +124,20 @@ public class WorkflowStepRunner {
                 step.getAttemptCount(),
                 maxAttemptsForTool(step.getToolName()));
 
-        try {
-            Map<String, String> prior = collectPriorOutputs(step, stepsByKey);
-            Map<String, Object> params = readParams(step);
-            AgentTool tool = toolRegistry.requireExecutor(step.getToolName());
-            ToolResult result = tool.execute(
-                    new ToolExecutionContext(run.getRunId(), step.getStepKey(), run.getQuestion(), prior),
-                    params);
+        return new StepInvocation(
+                step.getStepKey(),
+                step.getToolName(),
+                run.getQuestion(),
+                readParams(step),
+                collectPriorOutputs(step, stepsByKey));
+    }
 
+    /** Phase 3: persist the tool outcome (COMPLETED / FAILED / retry / async-pending) in its own tx. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public StepRunResult finishStep(UUID runId, UUID stepId, ToolResult result) {
+        OrchestratorStep step = loadWithRetry(() -> stepRepo.findById(stepId).orElse(null),
+                "Step not found (not yet committed?): " + stepId);
+        try {
             if (!result.success()) {
                 return failOrRetry(step, result.errorMessage());
             }
@@ -109,13 +160,41 @@ public class WorkflowStepRunner {
                     LogSanitizer.jsonSummary(step.getOutputJson()));
             return new StepRunResult(StepOutcome.COMPLETED, null);
         } catch (Exception e) {
-            log.warn("Run {} step {} tool {} failed: {}",
+            log.warn("Run {} step {} tool {} persist failed: {}",
                     runId,
                     step.getStepKey(),
                     step.getToolName(),
                     LogSanitizer.message(e.getMessage()));
             return failOrRetry(step, e.getMessage());
         }
+    }
+
+    /**
+     * Invokes the tool over HTTP at its registered endpointUrl when enabled, otherwise calls the
+     * in-process executor bean directly (fallback / local dev).
+     */
+    private ToolResult invokeTool(String toolName, ToolExecutionContext ctx, Map<String, Object> params) {
+        if (props.isInvokeToolsOverHttp()) {
+            return httpToolInvoker.invoke(toolName, ctx, params);
+        }
+        return toolRegistry.requireExecutor(toolName).execute(ctx, params);
+    }
+
+    /** Re-queries an entity a few times to tolerate brief commit-visibility lag across transactions. */
+    private <T> T loadWithRetry(java.util.function.Supplier<T> loader, String notFoundMessage) {
+        for (int attempt = 1; attempt <= 6; attempt++) {
+            T value = loader.get();
+            if (value != null) {
+                return value;
+            }
+            try {
+                Thread.sleep(250L);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        throw new IllegalStateException(notFoundMessage);
     }
 
     private StepRunResult failOrRetry(OrchestratorStep step, String message) {

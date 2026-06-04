@@ -61,8 +61,7 @@ public class LlmAnswerTool implements AgentTool {
                 + "/chat/completions?api-version=" + props.getEffectiveChatApiVersion());
 
         ObjectNode root = mapper.createObjectNode();
-        root.put("temperature", 0.3);
-        root.put("max_tokens", 2048);
+        root.put("max_completion_tokens", 2048);
         ArrayNode messages = root.putArray("messages");
         messages.addObject().put("role", "system").put("content",
                 "You are a risk-control Q&A assistant. Use tool outputs in context.");

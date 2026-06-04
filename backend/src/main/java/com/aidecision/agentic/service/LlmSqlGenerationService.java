@@ -102,8 +102,7 @@ public class LlmSqlGenerationService {
                 + "/chat/completions?api-version=" + openAi.getEffectiveChatApiVersion());
 
         ObjectNode root = mapper.createObjectNode();
-        root.put("temperature", temperature);
-        root.put("max_tokens", maxTokens);
+        root.put("max_completion_tokens", maxTokens);
         ArrayNode messages = root.putArray("messages");
         messages.addObject().put("role", "system").put("content", system);
         messages.addObject().put("role", "user").put("content", user);

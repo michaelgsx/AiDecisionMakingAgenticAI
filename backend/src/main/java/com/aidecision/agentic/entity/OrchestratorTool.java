@@ -35,6 +35,13 @@ public class OrchestratorTool {
     @Column(name = "response_schema_json", nullable = false, columnDefinition = "nvarchar(max)")
     private String responseSchemaJson;
 
+    /**
+     * Relative URL the executor calls to invoke this tool, e.g.
+     * {@code /agent/tools/data_acquisition/1.1.0/execute}. Nullable for legacy rows.
+     */
+    @Column(name = "endpoint_url", length = 256)
+    private String endpointUrl;
+
     @Column(nullable = false)
     private boolean enabled = true;
 
@@ -79,6 +86,9 @@ public class OrchestratorTool {
 
     public String getResponseSchemaJson() { return responseSchemaJson; }
     public void setResponseSchemaJson(String responseSchemaJson) { this.responseSchemaJson = responseSchemaJson; }
+
+    public String getEndpointUrl() { return endpointUrl; }
+    public void setEndpointUrl(String endpointUrl) { this.endpointUrl = endpointUrl; }
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }

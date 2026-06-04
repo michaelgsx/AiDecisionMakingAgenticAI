@@ -16,7 +16,7 @@ class WorkflowPlannerPromptBuilderTest {
 
     @BeforeEach
     void setUp() {
-        builder = new WorkflowPlannerPromptBuilder(new OrchestratorProperties(), new ObjectMapper());
+        builder = new WorkflowPlannerPromptBuilder(new OrchestratorProperties(), null, new ObjectMapper());
     }
 
     @Test
@@ -34,7 +34,8 @@ class WorkflowPlannerPromptBuilderTest {
         assertThat(prompt.userPrompt()).contains("## 2. Available tools");
         assertThat(prompt.userPrompt()).contains("data_acquisition");
         assertThat(prompt.userPrompt()).contains("requestSchema");
-        assertThat(prompt.userPrompt()).contains("## 3. Required output JSON schema");
+        assertThat(prompt.userPrompt()).contains("## 3. SQL data catalog");
+        assertThat(prompt.userPrompt()).contains("## 4. Required output JSON schema");
         assertThat(prompt.outputJsonSchema()).contains("\"status\"");
         assertThat(prompt.outputJsonSchema()).contains("insufficient_tools");
         assertThat(prompt.outputJsonSchema()).contains("steps");

@@ -31,14 +31,22 @@ public class OrchestratorWorker {
                 RunStatus.RUNNING.name()
         );
 
-        List<OrchestratorRun> runs = runRepo.findByStatusInOrderByUpdatedAtAsc(active);
+        List<OrchestratorRun> runs;
+        try {
+            runs = runRepo.findByStatusInOrderByUpdatedAtAsc(active);
+        } catch (Throwable t) {
+            // Never let a failure escape the scheduled method: a thrown Throwable would cancel
+            // this fixedDelay task permanently and silently freeze the whole orchestrator.
+            log.warn("Worker could not list active runs: {}", LogSanitizer.message(String.valueOf(t.getMessage())));
+            return;
+        }
         for (OrchestratorRun run : runs) {
             try {
                 engine.processRun(run.getRunId());
-            } catch (Exception e) {
+            } catch (Throwable t) {
                 log.warn("Worker could not process run {}: {}",
                         run.getRunId(),
-                        LogSanitizer.message(e.getMessage()));
+                        LogSanitizer.message(String.valueOf(t.getMessage())));
             }
         }
     }

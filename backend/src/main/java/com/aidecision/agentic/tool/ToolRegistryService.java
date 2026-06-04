@@ -85,6 +85,7 @@ public class ToolRegistryService {
         row.setExecutionMode(def.executionMode());
         row.setRequestSchemaJson(def.requestSchemaJson());
         row.setResponseSchemaJson(def.responseSchemaJson());
+        row.setEndpointUrl(def.endpointUrl());
         row.setEnabled(true);
         toolRepo.save(row);
         log.debug("Synced tool schemas/descriptions: {}", def.name());
@@ -100,6 +101,7 @@ public class ToolRegistryService {
         row.setExecutionMode(def.executionMode());
         row.setRequestSchemaJson(def.requestSchemaJson());
         row.setResponseSchemaJson(def.responseSchemaJson());
+        row.setEndpointUrl(def.endpointUrl());
         row.setEnabled(true);
         return row;
     }
@@ -172,6 +174,10 @@ public class ToolRegistryService {
         row.setExecutionMode(request.executionMode());
         row.setRequestSchemaJson(schemaConverter.toJsonSchema(request.inputSchema()));
         row.setResponseSchemaJson(schemaConverter.toJsonSchema(request.outputSchema()));
+        row.setEndpointUrl(
+                request.endpointUrl() != null && !request.endpointUrl().isBlank()
+                        ? request.endpointUrl().trim()
+                        : BuiltinToolCatalog.executeUrl(request.name(), request.version().trim()));
         row.setEnabled(request.enabled());
 
         OrchestratorTool saved = toolRepo.save(row);
@@ -191,6 +197,7 @@ public class ToolRegistryService {
                 tool.getExecutionMode(),
                 schemaConverter.fromJsonSchema(tool.getRequestSchemaJson()),
                 schemaConverter.fromJsonSchema(tool.getResponseSchemaJson()),
+                tool.getEndpointUrl(),
                 tool.isEnabled(),
                 hasExecutor(tool.getToolName()),
                 tool.getCreatedAt(),

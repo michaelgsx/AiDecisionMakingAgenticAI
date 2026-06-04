@@ -19,13 +19,24 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
 public class OrchestratorEngine {
 
     private static final Logger log = LoggerFactory.getLogger(OrchestratorEngine.class);
+
+    /**
+     * Runs currently being driven by a thread in THIS JVM. Multiple paths can ask to process the
+     * same run at once (the {@code @Async} chat processor fires immediately while the scheduled
+     * {@link OrchestratorWorker} also polls it). Without this guard both threads enter
+     * {@link #executeRunningWorkflow}/{@link #planAndPersistWorkflow}, re-plan, and the
+     * {@code deleteByRunId} of one wipes the in-flight steps of the other ("Step not found").
+     */
+    private final Set<UUID> inFlightRuns = ConcurrentHashMap.newKeySet();
 
     private final OrchestratorRunRepository runRepo;
     private final OrchestratorStepRepository stepRepo;
@@ -81,6 +92,21 @@ public class OrchestratorEngine {
     }
 
     public void processRun(UUID runId) {
+        // Guard against two threads in this JVM driving the same run at once (e.g. the @Async
+        // chat processor and the scheduled worker both picking it up). Only one may proceed;
+        // the other returns immediately and will re-poll later if there is still work to do.
+        if (!inFlightRuns.add(runId)) {
+            log.debug("Run {} already being processed in this JVM; skipping", runId);
+            return;
+        }
+        try {
+            doProcessRun(runId);
+        } finally {
+            inFlightRuns.remove(runId);
+        }
+    }
+
+    private void doProcessRun(UUID runId) {
         OrchestratorRun run = runRepo.findById(runId).orElse(null);
         if (run == null) {
             return;
@@ -90,6 +116,14 @@ public class OrchestratorEngine {
             log.debug("Run {} processRun status={}", runId, run.getStatus());
             switch (RunStatus.valueOf(run.getStatus())) {
                 case PENDING -> {
+                    // Atomically claim the run so a concurrent worker (e.g. an old container
+                    // draining during deploy) cannot plan the same run twice.
+                    if (runRepo.compareAndSetStatus(
+                            runId, RunStatus.PENDING.name(), RunStatus.PLANNING.name()) == 0) {
+                        log.debug("Run {} already claimed by another worker; skipping", runId);
+                        return;
+                    }
+                    run.setStatus(RunStatus.PLANNING.name());
                     self.planAndPersistWorkflow(run);
                     executeRunningWorkflow(run.getRunId());
                 }
@@ -163,7 +197,9 @@ public class OrchestratorEngine {
     }
 
     private void persistSteps(OrchestratorRun run, WorkflowDag dag) throws Exception {
-        stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId()).forEach(stepRepo::delete);
+        // Bulk-delete + flush before inserts so re-planning never collides with Hibernate's
+        // default INSERT-before-DELETE flush ordering on the (run_id, step_key) unique key.
+        stepRepo.deleteByRunId(run.getRunId());
 
         for (WorkflowDag.WorkflowStepDef def : dag.steps()) {
             OrchestratorStep step = new OrchestratorStep();
