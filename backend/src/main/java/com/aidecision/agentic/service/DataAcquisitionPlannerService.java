@@ -57,7 +57,7 @@ public class DataAcquisitionPlannerService {
 
     public TableSelection selectTables(String question, List<String> candidates) throws Exception {
         if (candidates == null || candidates.isEmpty()) {
-            candidates = catalog.enabledTableNames();
+            return new TableSelection(List.of(), "No candidate tables after user ACL.");
         }
         Set<String> allowed = new HashSet<>(candidates);
 

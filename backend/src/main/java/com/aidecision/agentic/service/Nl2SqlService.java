@@ -11,8 +11,8 @@ public class Nl2SqlService {
         this.sqlGeneration = sqlGeneration;
     }
 
-    public String generateSql(String question) throws Exception {
+    public String generateSql(String question, String userId) throws Exception {
         return sqlGeneration.generateSql(
-                question, LlmSqlGenerationService.Mode.ANALYTICS, null);
+                question, LlmSqlGenerationService.Mode.ANALYTICS, null, userId);
     }
 }

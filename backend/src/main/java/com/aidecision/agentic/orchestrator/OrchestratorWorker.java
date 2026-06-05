@@ -28,6 +28,7 @@ public class OrchestratorWorker {
     public void pollRuns() {
         List<String> active = List.of(
                 RunStatus.PENDING.name(),
+                RunStatus.PLANNING.name(),
                 RunStatus.RUNNING.name()
         );
 

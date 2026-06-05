@@ -289,7 +289,8 @@ public class WorkflowExecutor {
                 prior.put(dep, d.getOutputJson());
             }
         }
-        return new ToolExecutionContext(run.getRunId(), step.getStepKey(), run.getQuestion(), prior);
+        return new ToolExecutionContext(
+                run.getRunId(), step.getStepKey(), run.getQuestion(), prior, run.getUserId());
     }
 
     private Map<String, Object> readOutputMap(OrchestratorStep step) {

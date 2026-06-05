@@ -43,7 +43,7 @@ public class DataAcquisitionTool implements AgentTool {
 
         try {
             DataAcquisitionService.AcquisitionResult result =
-                    acquisition.acquire(question, scenario, maxRows, tableNames);
+                    acquisition.acquire(question, scenario, maxRows, tableNames, ctx.userId());
             return ToolResult.ok(Map.of(
                     "scenario", result.scenario(),
                     "candidateTables", result.candidateTables(),

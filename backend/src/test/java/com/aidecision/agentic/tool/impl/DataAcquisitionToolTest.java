@@ -28,7 +28,7 @@ class DataAcquisitionToolTest {
 
     @Test
     void execute_returnsSqlAndRows() throws Exception {
-        when(acquisition.acquire(eq("freeze?"), eq("qa"), eq(50), anyList()))
+        when(acquisition.acquire(eq("freeze?"), eq("qa"), eq(50), anyList(), eq("admin")))
                 .thenReturn(new DataAcquisitionService.AcquisitionResult(
                         "qa",
                         List.of("risk_features", "risk_decisions"),
@@ -41,7 +41,7 @@ class DataAcquisitionToolTest {
                         "ok"));
 
         ToolResult result = tool.execute(
-                new ToolExecutionContext(UUID.randomUUID(), "s1", "freeze?", Map.of()),
+                new ToolExecutionContext(UUID.randomUUID(), "s1", "freeze?", Map.of(), "admin"),
                 Map.of("scenario", "qa"));
 
         assertThat(result.success()).isTrue();
@@ -51,7 +51,7 @@ class DataAcquisitionToolTest {
     @Test
     void execute_missingQuestion_fails() {
         ToolResult result = tool.execute(
-                new ToolExecutionContext(UUID.randomUUID(), "s1", "", Map.of()),
+                new ToolExecutionContext(UUID.randomUUID(), "s1", "", Map.of(), null),
                 Map.of());
 
         assertThat(result.success()).isFalse();

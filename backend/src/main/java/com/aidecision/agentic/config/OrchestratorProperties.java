@@ -12,6 +12,12 @@ public class OrchestratorProperties {
     private long defaultStepTimeoutMs = 120_000;
     private long maxRunAgeMs = 3_600_000;
 
+    /** Non-terminal status rows older than this are considered dead and eligible for revival. */
+    private long staleTaskThresholdMs = 300_000;
+
+    /** How often the revival sweeper checks async_chat_status for dead tasks. */
+    private long revivalPollIntervalMs = 10_000;
+
     /** When true, the executor invokes each tool over HTTP at its registered endpointUrl. */
     private boolean invokeToolsOverHttp = true;
 
@@ -35,6 +41,12 @@ public class OrchestratorProperties {
 
     public long getMaxRunAgeMs() { return maxRunAgeMs; }
     public void setMaxRunAgeMs(long maxRunAgeMs) { this.maxRunAgeMs = maxRunAgeMs; }
+
+    public long getStaleTaskThresholdMs() { return staleTaskThresholdMs; }
+    public void setStaleTaskThresholdMs(long staleTaskThresholdMs) { this.staleTaskThresholdMs = staleTaskThresholdMs; }
+
+    public long getRevivalPollIntervalMs() { return revivalPollIntervalMs; }
+    public void setRevivalPollIntervalMs(long revivalPollIntervalMs) { this.revivalPollIntervalMs = revivalPollIntervalMs; }
 
     public boolean isInvokeToolsOverHttp() { return invokeToolsOverHttp; }
     public void setInvokeToolsOverHttp(boolean invokeToolsOverHttp) { this.invokeToolsOverHttp = invokeToolsOverHttp; }

@@ -45,6 +45,8 @@ app:
     worker-poll-interval-ms: 2000
     default-step-max-time-ms: 30000
     default-step-timeout-ms: 120000
+    stale-task-threshold-ms: ${ORCH_STALE_TASK_THRESHOLD_MS:300000}
+    revival-poll-interval-ms: ${ORCH_REVIVAL_POLL_INTERVAL_MS:10000}
     invoke-tools-over-http: ${ORCH_INVOKE_TOOLS_OVER_HTTP:true}
     tool-base-url: ${ORCH_TOOL_BASE_URL:http://localhost:${PORT:8788}}
   azure-openai:

@@ -14,21 +14,29 @@ public class DataAcquisitionService {
 
     private final DataAcquisitionPlannerService planner;
     private final SchemaCatalogService catalog;
+    private final UserTableAccessService userTableAccess;
     private final ReadOnlySqlExecutor sqlExecutor;
 
     public DataAcquisitionService(
             DataAcquisitionPlannerService planner,
             SchemaCatalogService catalog,
+            UserTableAccessService userTableAccess,
             ReadOnlySqlExecutor sqlExecutor) {
         this.planner = planner;
         this.catalog = catalog;
+        this.userTableAccess = userTableAccess;
         this.sqlExecutor = sqlExecutor;
     }
 
-    public AcquisitionResult acquire(String question, String scenario, int maxRows, List<String> tableOverride)
+    public AcquisitionResult acquire(
+            String question, String scenario, int maxRows, List<String> tableOverride, String userId)
             throws Exception {
         String scenarioKey = scenario == null || scenario.isBlank() ? "qa" : scenario.trim();
-        List<String> candidates = resolveCandidates(scenarioKey, tableOverride);
+        List<String> candidates = resolveCandidates(scenarioKey, tableOverride, userId);
+        if (candidates.isEmpty()) {
+            throw new IllegalStateException(
+                    "No schema tables permitted for user: " + userTableAccess.resolveUserId(userId));
+        }
 
         DataAcquisitionPlannerService.TableSelection selection =
                 planner.selectTables(question, candidates);
@@ -59,15 +67,20 @@ public class DataAcquisitionService {
      * exist. Keep only names present in the enabled catalog; if none survive, fall back to the
      * scenario's real tables so SQL is always generated against existing objects.
      */
-    private List<String> resolveCandidates(String scenarioKey, List<String> tableOverride) {
+    private List<String> resolveCandidates(String scenarioKey, List<String> tableOverride, String userId) {
+        List<String> scenarioCandidates;
         if (tableOverride == null || tableOverride.isEmpty()) {
-            return catalog.tablesForScenario(scenarioKey);
+            scenarioCandidates = catalog.tablesForScenario(scenarioKey);
+        } else {
+            Set<String> enabled = new HashSet<>(catalog.enabledTableNames());
+            List<String> valid = tableOverride.stream()
+                    .filter(enabled::contains)
+                    .toList();
+            scenarioCandidates = valid.isEmpty() ? catalog.tablesForScenario(scenarioKey) : valid;
         }
-        Set<String> enabled = new HashSet<>(catalog.enabledTableNames());
-        List<String> valid = tableOverride.stream()
-                .filter(enabled::contains)
-                .toList();
-        return valid.isEmpty() ? catalog.tablesForScenario(scenarioKey) : valid;
+        // ACL gate — always consult user_table_access before schema catalog descriptions / SQL.
+        List<String> aclFiltered = userTableAccess.intersectCandidates(userId, scenarioCandidates);
+        return aclFiltered.isEmpty() ? userTableAccess.allowedTableNames(userId) : aclFiltered;
     }
 
     private static Map<String, Object> buildFeatures(

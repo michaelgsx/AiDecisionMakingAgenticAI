@@ -73,6 +73,7 @@ public class WorkflowStepRunner {
             String stepKey,
             String toolName,
             String question,
+            String userId,
             Map<String, Object> params,
             Map<String, String> priorOutputs) {}
 
@@ -85,8 +86,8 @@ public class WorkflowStepRunner {
     public StepRunResult runSyncStep(UUID runId, UUID stepId) {
         StepInvocation inv = self.beginStep(runId, stepId);
 
-        ToolExecutionContext ctx =
-                new ToolExecutionContext(runId, inv.stepKey(), inv.question(), inv.priorOutputs());
+        ToolExecutionContext ctx = new ToolExecutionContext(
+                runId, inv.stepKey(), inv.question(), inv.priorOutputs(), inv.userId());
         ToolResult result;
         try {
             result = invokeTool(inv.toolName(), ctx, inv.params());
@@ -128,6 +129,7 @@ public class WorkflowStepRunner {
                 step.getStepKey(),
                 step.getToolName(),
                 run.getQuestion(),
+                run.getUserId(),
                 readParams(step),
                 collectPriorOutputs(step, stepsByKey));
     }

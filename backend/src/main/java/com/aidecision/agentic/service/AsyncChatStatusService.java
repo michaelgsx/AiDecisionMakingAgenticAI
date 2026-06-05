@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -78,6 +80,31 @@ public class AsyncChatStatusService {
 
     public Optional<AsyncChatStatus> findByRunId(UUID runId) {
         return repo.findByRunId(runId);
+    }
+
+    private static final List<String> REVIVABLE_STATUSES = List.of(
+            AsyncChatPhase.PLANNING.name(),
+            AsyncChatPhase.EXECUTING.name(),
+            AsyncChatPhase.LLM_ANSWERING.name());
+
+    /** Status rows that have not progressed within the stale threshold (linked to a run). */
+    @Transactional(readOnly = true)
+    public List<AsyncChatStatus> findStaleCandidates(Instant cutoff) {
+        return repo.findByStatusInAndUpdatedAtBeforeAndRunIdIsNotNullOrderByUpdatedAtAsc(
+                REVIVABLE_STATUSES, cutoff);
+    }
+
+    /**
+     * Claim a stale row for revival by bumping {@code updated_at} to now. Returns true when this
+     * thread won the claim so another revival worker will skip it until the threshold elapses again.
+     */
+    @Transactional
+    public boolean claimForRevival(UUID requestId, Instant cutoff) {
+        int updated = repo.claimStale(requestId, Instant.now(), cutoff, REVIVABLE_STATUSES);
+        if (updated > 0) {
+            log.info("Revival claimed stale status row {}", requestId);
+        }
+        return updated > 0;
     }
 
     @Transactional

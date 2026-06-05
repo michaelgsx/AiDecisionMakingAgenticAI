@@ -23,6 +23,8 @@ class LlmSqlGenerationServiceTest {
     @Mock
     private SchemaCatalogService catalog;
     @Mock
+    private UserTableAccessService userTableAccess;
+    @Mock
     private RestClient http;
 
     @InjectMocks
@@ -31,11 +33,14 @@ class LlmSqlGenerationServiceTest {
     @Test
     void generateSql_whenChatNotConfigured_usesAcquisitionFallback() throws Exception {
         when(openAi.chatConfigured()).thenReturn(false);
+        when(userTableAccess.intersectCandidates(any(), any()))
+                .thenReturn(List.of("risk_features"));
 
         String sql = service.generateSql(
                 "user withdrawals?",
                 LlmSqlGenerationService.Mode.DATA_ACQUISITION,
-                List.of("risk_features"));
+                List.of("risk_features"),
+                "admin");
 
         assertThat(sql).containsIgnoringCase("risk_features");
         assertThat(sql).startsWith("SELECT");

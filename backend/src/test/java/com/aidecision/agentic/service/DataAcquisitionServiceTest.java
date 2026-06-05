@@ -23,6 +23,8 @@ class DataAcquisitionServiceTest {
     @Mock
     private SchemaCatalogService catalog;
     @Mock
+    private UserTableAccessService userTableAccess;
+    @Mock
     private ReadOnlySqlExecutor sqlExecutor;
 
     @InjectMocks
@@ -32,6 +34,8 @@ class DataAcquisitionServiceTest {
     void acquire_twoPhaseThenExecutesSql() throws Exception {
         when(catalog.tablesForScenario("withdrawal_review"))
                 .thenReturn(List.of("risk_features", "risk_decisions", "risk_ingest_records"));
+        when(userTableAccess.intersectCandidates(eq("analyst-1"), any()))
+                .thenAnswer(inv -> inv.getArgument(1));
         when(planner.selectTables(eq("freeze withdrawal?"), any()))
                 .thenReturn(new DataAcquisitionPlannerService.TableSelection(
                         List.of("risk_features", "risk_decisions"), "case and decision"));
@@ -41,7 +45,7 @@ class DataAcquisitionServiceTest {
                 .thenReturn(List.of(Map.of("user_id", "user-demo-001")));
 
         DataAcquisitionService.AcquisitionResult result =
-                service.acquire("freeze withdrawal?", "withdrawal_review", 20, List.of());
+                service.acquire("freeze withdrawal?", "withdrawal_review", 20, List.of(), "analyst-1");
 
         assertThat(result.tables()).containsExactly("risk_features", "risk_decisions");
         assertThat(result.tableSelectionReason()).contains("decision");

@@ -113,7 +113,7 @@ public class ToolOperationsService {
         String sk = stepKey == null || stepKey.isBlank() ? "api" : stepKey.trim();
         String q = question == null ? "" : question;
         Map<String, String> prior = priorOutputs == null ? Map.of() : priorOutputs;
-        return new ToolExecutionContext(rid, sk, q, prior);
+        return new ToolExecutionContext(rid, sk, q, prior, null);
     }
 
     private static Map<String, Object> safeParams(ToolExecuteRequest request) {

@@ -47,16 +47,19 @@ public class LlmSqlGenerationService {
 
     private final AzureOpenAiProperties openAi;
     private final SchemaCatalogService catalog;
+    private final UserTableAccessService userTableAccess;
     private final ObjectMapper mapper;
     private final RestClient http;
 
     public LlmSqlGenerationService(
             AzureOpenAiProperties openAi,
             SchemaCatalogService catalog,
+            UserTableAccessService userTableAccess,
             ObjectMapper mapper,
             RestClient http) {
         this.openAi = openAi;
         this.catalog = catalog;
+        this.userTableAccess = userTableAccess;
         this.mapper = mapper;
         this.http = http;
     }
@@ -65,12 +68,14 @@ public class LlmSqlGenerationService {
         return openAi.chatConfigured();
     }
 
-    public String generateSql(String question, Mode mode, List<String> tableNames) throws Exception {
+    public String generateSql(String question, Mode mode, List<String> tableNames, String userId)
+            throws Exception {
+        List<String> effectiveTables = resolveTablesForUser(tableNames, userId);
         if (!openAi.chatConfigured()) {
-            return fallbackSql(mode, tableNames);
+            return fallbackSql(mode, effectiveTables);
         }
 
-        String catalogText = catalog.buildLlmCatalogText(tableNames);
+        String catalogText = catalog.buildLlmCatalogText(effectiveTables);
         String system = mode == Mode.DATA_ACQUISITION ? DATA_ACQUISITION_SYSTEM : ANALYTICS_SYSTEM;
         String user = "Schema catalog (related tables and columns):\n"
                 + catalogText
@@ -117,6 +122,13 @@ public class LlmSqlGenerationService {
 
         JsonNode json = mapper.readTree(body == null ? "{}" : body);
         return json.path("choices").path(0).path("message").path("content").asText("").trim();
+    }
+
+    private List<String> resolveTablesForUser(List<String> tableNames, String userId) {
+        if (tableNames == null || tableNames.isEmpty()) {
+            return userTableAccess.allowedTableNames(userId);
+        }
+        return userTableAccess.intersectCandidates(userId, tableNames);
     }
 
     private String fallbackSql(Mode mode, List<String> tableNames) {
