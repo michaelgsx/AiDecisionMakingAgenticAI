@@ -38,7 +38,11 @@ public class WorkflowStepRunner {
     private final HttpToolInvoker httpToolInvoker;
     private final OrchestratorProperties props;
     private final ObjectMapper mapper;
+    private final StepFailureClassifier failureClassifier;
+    private final WorkflowContextSummarizer contextSummarizer;
     private final WorkflowStepRunner self;
+
+    static final String SUMMARIZED_PRIOR_KEY = "_summarizedPriorOutputs";
 
     public WorkflowStepRunner(
             OrchestratorRunRepository runRepo,
@@ -48,6 +52,8 @@ public class WorkflowStepRunner {
             HttpToolInvoker httpToolInvoker,
             OrchestratorProperties props,
             ObjectMapper mapper,
+            StepFailureClassifier failureClassifier,
+            WorkflowContextSummarizer contextSummarizer,
             @org.springframework.context.annotation.Lazy WorkflowStepRunner self) {
         this.runRepo = runRepo;
         this.stepRepo = stepRepo;
@@ -56,6 +62,8 @@ public class WorkflowStepRunner {
         this.httpToolInvoker = httpToolInvoker;
         this.props = props;
         this.mapper = mapper;
+        this.failureClassifier = failureClassifier;
+        this.contextSummarizer = contextSummarizer;
         this.self = self;
     }
 
@@ -115,15 +123,14 @@ public class WorkflowStepRunner {
 
         step.setStatus(StepStatus.RUNNING.name());
         step.setStartedAt(Instant.now());
-        step.setAttemptCount(step.getAttemptCount() + 1);
         stepRepo.save(step);
         asyncChatStatus.markStepStarted(runId, step.getStepKey(), step.getToolName());
-        log.info("Run {} step {} tool {} attempt {}/{} started",
+        log.info("Run {} step {} tool {} started (retry {}/{})",
                 runId,
                 step.getStepKey(),
                 step.getToolName(),
                 step.getAttemptCount(),
-                maxAttemptsForTool(step.getToolName()));
+                maxRetryForTool(step.getToolName()));
 
         return new StepInvocation(
                 step.getStepKey(),
@@ -154,6 +161,8 @@ public class WorkflowStepRunner {
 
             step.setFinishedAt(Instant.now());
             step.setStatus(StepStatus.COMPLETED.name());
+            step.setAttemptCount(0);
+            step.setErrorMessage(null);
             stepRepo.save(step);
             log.info("Run {} step {} tool {} completed output={}",
                     runId,
@@ -200,23 +209,50 @@ public class WorkflowStepRunner {
     }
 
     private StepRunResult failOrRetry(OrchestratorStep step, String message) {
-        int maxAttempts = maxAttemptsForTool(step.getToolName());
-        if (step.getAttemptCount() < maxAttempts) {
-            step.setStatus(StepStatus.READY.name());
-            step.setErrorMessage(null);
-            step.setStartedAt(null);
-            step.setFinishedAt(null);
-            step.setOutputJson(null);
-            stepRepo.save(step);
-            log.warn("Run {} step {} tool {} retry scheduled ({}/{}): {}",
-                    step.getRunId(),
-                    step.getStepKey(),
-                    step.getToolName(),
-                    step.getAttemptCount(),
-                    maxAttempts,
-                    LogSanitizer.message(message));
-            return new StepRunResult(StepOutcome.RETRY_READY, message);
+        StepFailureKind kind = failureClassifier.classify(message);
+        String userMessage = failureClassifier.userFacingMessage(kind, message);
+
+        if (kind == StepFailureKind.DATABASE_CONNECTION || kind == StepFailureKind.DATABASE_PERMISSION) {
+            return failPermanently(step, userMessage);
         }
+
+        int retry = step.getAttemptCount() + 1;
+        step.setAttemptCount(retry);
+        int maxRetry = maxRetryForTool(step.getToolName());
+
+        if (retry > maxRetry) {
+            return failPermanently(step, userMessage);
+        }
+
+        if (kind == StepFailureKind.CONTEXT_TOO_LARGE) {
+            try {
+                applyContextSummaries(step);
+            } catch (Exception e) {
+                log.warn("Run {} step {} could not summarize context before retry: {}",
+                        step.getRunId(),
+                        step.getStepKey(),
+                        LogSanitizer.message(e.getMessage()));
+            }
+        }
+
+        step.setStatus(StepStatus.READY.name());
+        step.setErrorMessage(null);
+        step.setStartedAt(null);
+        step.setFinishedAt(null);
+        step.setOutputJson(null);
+        stepRepo.save(step);
+        log.warn("Run {} step {} tool {} retry scheduled ({}/{}, kind={}): {}",
+                step.getRunId(),
+                step.getStepKey(),
+                step.getToolName(),
+                retry,
+                maxRetry,
+                kind,
+                LogSanitizer.message(message));
+        return new StepRunResult(StepOutcome.RETRY_READY, userMessage);
+    }
+
+    private StepRunResult failPermanently(OrchestratorStep step, String message) {
         step.setStatus(StepStatus.FAILED.name());
         step.setErrorMessage(truncate(message));
         step.setFinishedAt(Instant.now());
@@ -224,20 +260,58 @@ public class WorkflowStepRunner {
         return new StepRunResult(StepOutcome.FAILED, truncate(message));
     }
 
-    private int maxAttemptsForTool(String toolName) {
+    private void applyContextSummaries(OrchestratorStep step) throws Exception {
+        Map<String, OrchestratorStep> stepsByKey = stepRepo.findByRunIdOrderByCreatedAtAsc(step.getRunId())
+                .stream()
+                .collect(java.util.stream.Collectors.toMap(OrchestratorStep::getStepKey, s -> s, (a, b) -> a));
+        Map<String, String> prior = collectPriorOutputs(step, stepsByKey);
+        if (prior.isEmpty()) {
+            return;
+        }
+        Map<String, String> summarized = contextSummarizer.summarize(prior);
+        Map<String, Object> params = readParams(step);
+        params.put(SUMMARIZED_PRIOR_KEY, summarized);
+        step.setInputJson(mapper.writeValueAsString(params));
+    }
+
+    private int maxRetryForTool(String toolName) {
         var tool = toolRegistry.enabledToolsByName().get(toolName);
-        return tool == null ? 1 : Math.max(1, tool.getMaxRetry());
+        return tool == null ? 0 : Math.max(0, tool.getMaxRetry());
     }
 
     private Map<String, String> collectPriorOutputs(OrchestratorStep step, Map<String, OrchestratorStep> stepsByKey) {
         Map<String, String> prior = new HashMap<>();
+        Map<String, String> summarized = readSummarizedPriorOverrides(step);
         for (String dep : readDeps(step)) {
+            if (summarized.containsKey(dep)) {
+                prior.put(dep, summarized.get(dep));
+                continue;
+            }
             OrchestratorStep d = stepsByKey.get(dep);
             if (d != null && d.getOutputJson() != null) {
                 prior.put(dep, d.getOutputJson());
             }
         }
         return prior;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> readSummarizedPriorOverrides(OrchestratorStep step) {
+        try {
+            Map<String, Object> params = readParams(step);
+            Object raw = params.get(SUMMARIZED_PRIOR_KEY);
+            if (raw instanceof Map<?, ?> map) {
+                Map<String, String> out = new HashMap<>();
+                for (Map.Entry<?, ?> e : map.entrySet()) {
+                    if (e.getKey() != null && e.getValue() != null) {
+                        out.put(e.getKey().toString(), e.getValue().toString());
+                    }
+                }
+                return out;
+            }
+        } catch (Exception ignored) {
+        }
+        return Map.of();
     }
 
     private List<String> readDeps(OrchestratorStep step) {

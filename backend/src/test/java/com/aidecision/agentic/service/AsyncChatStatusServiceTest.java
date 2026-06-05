@@ -11,6 +11,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -77,5 +78,16 @@ class AsyncChatStatusServiceTest {
         when(repo.claimStale(eq(requestId), any(), eq(cutoff), any())).thenReturn(0);
 
         assertThat(service.claimForRevival(requestId, cutoff)).isFalse();
+    }
+
+    @Test
+    void findStaleCandidates_queriesNonTerminalRowsBeforeCutoff() {
+        Instant cutoff = Instant.now().minusSeconds(600);
+        AsyncChatStatus row = new AsyncChatStatus();
+        row.setRequestId(UUID.randomUUID());
+        when(repo.findByStatusInAndUpdatedAtBeforeAndRunIdIsNotNullOrderByUpdatedAtAsc(any(), eq(cutoff)))
+                .thenReturn(List.of(row));
+
+        assertThat(service.findStaleCandidates(cutoff)).containsExactly(row);
     }
 }

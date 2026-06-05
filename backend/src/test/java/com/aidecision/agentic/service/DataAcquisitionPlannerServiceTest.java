@@ -52,4 +52,13 @@ class DataAcquisitionPlannerServiceTest {
 
         assertThat(sel.tables()).isEqualTo(candidates);
     }
+
+    @Test
+    void selectTables_emptyCandidates_doesNotFallBackToFullCatalog() throws Exception {
+        DataAcquisitionPlannerService.TableSelection sel =
+                planner.selectTables("recent logins?", List.of());
+
+        assertThat(sel.tables()).isEmpty();
+        assertThat(sel.reason()).containsIgnoringCase("ACL");
+    }
 }

@@ -47,4 +47,21 @@ class UserTableAccessServiceTest {
         assertThat(service.intersectCandidates("analyst", List.of("risk_features", "qa_message")))
                 .containsExactly("risk_features");
     }
+
+    @Test
+    void allowedTableNames_returnsEmptyWhenUserHasNoAclRows() {
+        when(accessRepo.findDistinctTableNamesByUserId("nobody")).thenReturn(List.of());
+
+        assertThat(service.allowedTableNames("nobody")).isEmpty();
+    }
+
+    @Test
+    void intersectCandidates_emptyList_returnsAllAllowedForUser() {
+        when(accessRepo.findDistinctTableNamesByUserId("admin"))
+                .thenReturn(List.of("risk_features", "qa_message"));
+        when(catalog.enabledTableNames()).thenReturn(List.of("risk_features", "qa_message"));
+
+        assertThat(service.intersectCandidates("admin", List.of()))
+                .containsExactly("risk_features", "qa_message");
+    }
 }

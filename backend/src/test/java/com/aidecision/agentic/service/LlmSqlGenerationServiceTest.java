@@ -13,6 +13,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,6 +46,32 @@ class LlmSqlGenerationServiceTest {
 
         assertThat(sql).containsIgnoringCase("risk_features");
         assertThat(sql).startsWith("SELECT");
+    }
+
+    @Test
+    void generateSql_whenTableNamesNull_resolvesAllowedTablesForUser() throws Exception {
+        when(openAi.chatConfigured()).thenReturn(false);
+        when(userTableAccess.allowedTableNames("analyst")).thenReturn(List.of("risk_features"));
+
+        service.generateSql("count cases?", LlmSqlGenerationService.Mode.ANALYTICS, null, "analyst");
+
+        verify(userTableAccess).allowedTableNames("analyst");
+    }
+
+    @Test
+    void generateSql_intersectsExplicitTableNamesWithAcl() throws Exception {
+        when(openAi.chatConfigured()).thenReturn(false);
+        when(userTableAccess.intersectCandidates(eq("analyst"), eq(List.of("risk_features", "qa_message"))))
+                .thenReturn(List.of("risk_features"));
+
+        String sql = service.generateSql(
+                "count cases?",
+                LlmSqlGenerationService.Mode.DATA_ACQUISITION,
+                List.of("risk_features", "qa_message"),
+                "analyst");
+
+        assertThat(sql).containsIgnoringCase("dbo.risk_features");
+        verify(userTableAccess).intersectCandidates("analyst", List.of("risk_features", "qa_message"));
     }
 
     @Test

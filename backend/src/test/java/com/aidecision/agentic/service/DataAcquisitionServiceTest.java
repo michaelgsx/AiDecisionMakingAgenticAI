@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -52,5 +53,34 @@ class DataAcquisitionServiceTest {
         assertThat(result.sql()).contains("risk_features");
         assertThat(result.features()).containsEntry("source", "schema_catalog_two_phase_sql");
         verify(sqlExecutor).executeSelect("SELECT TOP 5 * FROM dbo.risk_features", 20);
+    }
+
+    @Test
+    void acquire_throwsWhenUserHasNoPermittedTables() {
+        when(catalog.tablesForScenario("qa")).thenReturn(List.of("risk_features"));
+        when(userTableAccess.intersectCandidates(eq("locked-user"), any())).thenReturn(List.of());
+        when(userTableAccess.allowedTableNames("locked-user")).thenReturn(List.of());
+        when(userTableAccess.resolveUserId("locked-user")).thenReturn("locked-user");
+
+        assertThatThrownBy(() -> service.acquire("any question?", "qa", 10, List.of(), "locked-user"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("locked-user");
+    }
+
+    @Test
+    void acquire_filtersPlannerTableOverrideThroughAcl() throws Exception {
+        when(catalog.enabledTableNames()).thenReturn(List.of("risk_features", "qa_message"));
+        when(userTableAccess.intersectCandidates(eq("admin"), eq(List.of("qa_message", "risk_features"))))
+                .thenReturn(List.of("risk_features"));
+        when(planner.selectTables(eq("freeze?"), eq(List.of("risk_features"))))
+                .thenReturn(new DataAcquisitionPlannerService.TableSelection(
+                        List.of("risk_features"), "ok"));
+        when(planner.generateSql(eq("freeze?"), eq(List.of("risk_features")), eq(10)))
+                .thenReturn("SELECT TOP 3 * FROM dbo.risk_features");
+        when(sqlExecutor.executeSelect(any(), eq(10))).thenReturn(List.of());
+
+        service.acquire("freeze?", "qa", 10, List.of("qa_message", "risk_features"), "admin");
+
+        verify(userTableAccess).intersectCandidates("admin", List.of("qa_message", "risk_features"));
     }
 }

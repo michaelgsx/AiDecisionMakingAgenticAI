@@ -181,8 +181,9 @@ public class OrchestratorEngine {
         if (!executor.runSyncWorkflowToCompletion(run)) {
             List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
             if (steps.stream().anyMatch(s -> StepStatus.FAILED.name().equals(s.getStatus()))) {
-                log.warn("Run {} failed: one or more steps failed", run.getRunId());
-                failRun(run, "One or more workflow steps failed");
+                String detail = firstFailedStepMessage(steps);
+                log.warn("Run {} failed: {}", run.getRunId(), LogSanitizer.message(detail));
+                failRun(run, detail);
             } else {
                 log.warn("Run {} failed: deadlock or retry limit exceeded", run.getRunId());
                 failRun(run, "Workflow execution deadlock or exceeded retry limit");
@@ -288,6 +289,20 @@ public class OrchestratorEngine {
         runRepo.save(run);
         asyncChatStatus.markFailed(run.getRunId(), message);
         log.warn("Run {} failed: {}", run.getRunId(), LogSanitizer.message(message));
+    }
+
+    private static String firstFailedStepMessage(List<OrchestratorStep> steps) {
+        return steps.stream()
+                .filter(s -> StepStatus.FAILED.name().equals(s.getStatus()))
+                .findFirst()
+                .map(s -> {
+                    String err = s.getErrorMessage();
+                    if (err != null && !err.isBlank()) {
+                        return "Step " + s.getStepKey() + " (" + s.getToolName() + "): " + err;
+                    }
+                    return "Step " + s.getStepKey() + " (" + s.getToolName() + ") failed";
+                })
+                .orElse("One or more workflow steps failed");
     }
 
     private static String blankToNull(String s) {
