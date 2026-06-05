@@ -1,29 +1,31 @@
 # `data_acquisition` (v1.1.0)
 
-## 能做什么
+## What it does
 
-根据用户问题与场景（`scenario`），从 **schema catalog**（`schema_catalog_table/column/foreign_key`）中：
+Given a user question and a **scenario** (`scenario`), uses the **schema catalog** (`schema_catalog_table` / `column` / `foreign_key`) to:
 
-1. **先选表**（table index：表名 + 表描述）
-2. **再写 SQL**（columns + foreign keys：列描述 + JOIN 边）
-3. 执行 **只读 SELECT**（带 TOP 限制），返回用于后续工具（RAG、`llm_answer`）的 **上下文行**
+1. **Select tables** (table index: name + description)
+2. **Generate SQL** (columns + foreign keys: column descriptions + JOIN edges)
+3. Run a **read-only SELECT** (with TOP limit) and return **context rows** for downstream tools (RAG, `llm_answer`)
 
-适用：需要“取几行关键上下文数据”来支撑后续解释/决策的问题（case/user/withdrawal/device/review outcome 等）。
+**Good fit:** Questions that need a few key context rows to support explanation or decisions (case / user / withdrawal / device / review outcome, etc.).
 
-不适用：复杂 BI 报表/多语句/写入；此工具强制 read-only 单条 SELECT。
+**Poor fit:** Complex BI reports, multi-statement batches, or writes — this tool enforces a single read-only SELECT.
 
-## 主要流程
+## Main flow
 
-1. **输入**：`question` + `scenario`（可选 `tableNames` 做候选表覆盖）
-2. **Phase 1（选表）**：把候选表的“表名+表描述”拼成 table index，提示 LLM 输出 JSON：`{"tables":[...],"reason":"..."}`  
-3. **Phase 2（写 SQL）**：只给 LLM 看“列信息 + FOREIGN KEYS”，要求输出 **SQL only**
-4. **执行**：`ReadOnlySqlExecutor.executeSelect(sql, maxRows)` 返回 `rows`
+1. **Input:** `question` + `scenario` (optional `tableNames` to override candidate tables)
+2. **Phase 1 (table selection):** Build a table index (name + description) for candidates; prompt the LLM for JSON: `{"tables":[...],"reason":"..."}`
+3. **Phase 2 (SQL generation):** Show the LLM column detail + FOREIGN KEYS only; require **SQL only** output
+4. **Execute:** `ReadOnlySqlExecutor.executeSelect(sql, maxRows)` → `rows`
 
-## Prompt 示例
+User table ACL (`user_table_access`) is applied before catalog lookup; see root README.
 
-### Phase 1：选表（输出 JSON）
+## Prompt examples
 
-系统指令（节选，真实实现见 `DataAcquisitionPlannerService`）：
+### Phase 1: table selection (JSON output)
+
+System instruction (excerpt; full text in `DataAcquisitionPlannerService`):
 
 ```text
 You pick database tables needed to answer a risk/QA question.
@@ -32,7 +34,7 @@ Output ONLY JSON: {"tables":["table_a"],"reason":"one sentence"}.
 Rules: at least one table; at most 6 tables.
 ```
 
-用户内容形态：
+User message shape:
 
 ```text
 Table index:
@@ -44,9 +46,9 @@ User question:
 Should we freeze this $15k withdrawal? User user-demo-001 had a new device yesterday.
 ```
 
-### Phase 2：生成 SQL（输出 SQL only）
+### Phase 2: SQL generation (SQL only)
 
-系统指令（节选）：
+System instruction (excerpt):
 
 ```text
 Use ONLY tables, columns, and FOREIGN KEYS from the schema detail below.
@@ -55,9 +57,9 @@ Output ONLY the SQL.
 Rules: single SELECT; no semicolons; use TOP N or less; read-only.
 ```
 
-## 请求（execute）示例
+## Execute request example
 
-Endpoint：`POST /agent/tools/data_acquisition/1.1.0/execute`
+Endpoint: `POST /agent/tools/data_acquisition/1.1.0/execute`
 
 ```json
 {
@@ -67,7 +69,7 @@ Endpoint：`POST /agent/tools/data_acquisition/1.1.0/execute`
 }
 ```
 
-可选覆盖候选表（跳过 scenario 默认映射）：
+Optional candidate table override (skips scenario default mapping):
 
 ```json
 {
@@ -78,7 +80,7 @@ Endpoint：`POST /agent/tools/data_acquisition/1.1.0/execute`
 }
 ```
 
-## 返回示例
+## Response example
 
 ```json
 {
@@ -103,4 +105,3 @@ Endpoint：`POST /agent/tools/data_acquisition/1.1.0/execute`
   "note": "Loaded 1 row(s) from 2 table(s) (scenario withdrawal_review)."
 }
 ```
-

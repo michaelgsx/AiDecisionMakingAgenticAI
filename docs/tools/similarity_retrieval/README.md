@@ -1,13 +1,12 @@
 # `similarity_retrieval` (v1.1.0)
 
-## 能做什么
+## What it does
 
-**Legacy alias**：参数与返回值与 `ai_decision_rag` 相同，内部直接委托到 `ai_decision_rag` 的实现。
+**Legacy alias:** Same request and response schema as `ai_decision_rag`; internally delegates to the `ai_decision_rag` implementation.
 
-> 新 workflow 推荐直接用 `ai_decision_rag`，保留该 tool 主要为了兼容旧的 planner 输出与历史数据。
+> New workflows should use `ai_decision_rag` directly. This tool remains for older planner output and historical runs.
 
-## 请求/返回
+## Request / response
 
-- Endpoint：`POST /agent/tools/similarity_retrieval/1.1.0/execute`
-- Schema：与 `ai_decision_rag` 完全一致（见 [`ai_decision_rag` README](../ai_decision_rag/README.md)）
-
+- Endpoint: `POST /agent/tools/similarity_retrieval/1.1.0/execute`
+- Schema: Identical to `ai_decision_rag` — see [`ai_decision_rag` README](../ai_decision_rag/README.md)

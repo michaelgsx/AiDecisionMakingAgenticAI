@@ -1,31 +1,31 @@
 # `llm_answer` (v1.1.0)
 
-## 能做什么
+## What it does
 
-把 workflow 前序步骤的输出（例如 `data_acquisition.rows`、`ai_decision_rag.aiLabel/hits`、`human_in_the_loop.accepted`）
-汇总成最终的 **用户可读回答**。
+Combines outputs from prior workflow steps (e.g. `data_acquisition.rows`, `ai_decision_rag.aiLabel` / `hits`, `human_in_the_loop.accepted`) into a final **user-facing answer**.
 
-适用：作为 DAG 最后一步生成最终答复。
+**Good fit:** Last step in the DAG that produces the reply shown to the user.
 
-## 主要流程
+## Main flow
 
-1. **输入**：无必填参数（从 workflow context 读取所有 step outputs）
-2. **Prompt**：把已执行步骤输出拼进 user message，让 LLM 生成最终回答文本
-3. **输出**：`{ "answer": "..." }`
+1. **Input:** No required params (reads all prior step outputs from workflow context)
+2. **Prompt:** Prior step outputs are concatenated into the user message; the LLM generates the final answer text
+3. **Output:** `{ "answer": "..." }`
 
-## 请求示例
+If upstream context exceeds the model limit, the orchestrator may summarize prior outputs on adaptive retry before re-invoking this tool.
 
-Endpoint：`POST /agent/tools/llm_answer/1.1.0/execute`
+## Request example
+
+Endpoint: `POST /agent/tools/llm_answer/1.1.0/execute`
 
 ```json
 {}
 ```
 
-## 返回示例
+## Response example
 
 ```json
 {
   "answer": "Based on similar frozen cases and the user's new device, we recommend freezing the withdrawal pending verification..."
 }
 ```
-

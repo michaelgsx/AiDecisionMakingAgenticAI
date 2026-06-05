@@ -1,25 +1,24 @@
 # `ai_decision_rag` (v1.1.0)
 
-## 能做什么
+## What it does
 
-把一段 case 文本（以及可选 metadata）发给 **AiDecisionMakingBackend** 的 hybrid RAG assess 接口，
-返回相似案例命中（hits）与模型建议标签（`aiLabel`: passed/rejected/frozen）及原因。
+Sends case text (and optional metadata) to **AiDecisionMakingBackend** hybrid RAG assess and returns similar-case **hits** plus a model recommendation label (`aiLabel`: passed / rejected / frozen) and reasoning.
 
-适用：需要“找类似历史案例 + 给出建议标签”的风控决策辅助。
+**Good fit:** Risk decision support that needs “find similar historical cases + suggested label.”
 
-## 主要流程
+## Main flow
 
-1. **输入**：`text`（或 `query`）+ 可选 `metadata`（JSON string）
-2. **调用下游**：AiDecisionMakingBackend `/rag/assess`（实现见 `AiDecisionRagSimilarityTool`）
-3. **输出**：`aiLabel` + `aiReason` + `hits`（供 workflow 分支与 `llm_answer` 汇总）
+1. **Input:** `text` (or `query`) + optional `metadata` (JSON string)
+2. **Downstream call:** AiDecisionMakingBackend `POST /rag/assess` (implementation: `AiDecisionRagSimilarityTool`)
+3. **Output:** `aiLabel` + `aiReason` + `hits` (for workflow branching and `llm_answer`)
 
-## Prompt/行为说明
+## Prompt / behavior
 
-此 tool 本身不直接构造 LLM prompt（而是调用下游 RAG 服务，由下游决定是否使用 LLM 生成 `aiReason`）。
+This tool does not build an LLM prompt itself; it delegates to the RAG service, which may use an LLM for `aiReason` when configured.
 
-## 请求（execute）示例
+## Execute request example
 
-Endpoint：`POST /agent/tools/ai_decision_rag/1.1.0/execute`
+Endpoint: `POST /agent/tools/ai_decision_rag/1.1.0/execute`
 
 ```json
 {
@@ -28,7 +27,7 @@ Endpoint：`POST /agent/tools/ai_decision_rag/1.1.0/execute`
 }
 ```
 
-也可以用 `query` 作为别名：
+`query` is an alias for `text`:
 
 ```json
 {
@@ -36,7 +35,7 @@ Endpoint：`POST /agent/tools/ai_decision_rag/1.1.0/execute`
 }
 ```
 
-## 返回示例
+## Response example
 
 ```json
 {
@@ -52,4 +51,3 @@ Endpoint：`POST /agent/tools/ai_decision_rag/1.1.0/execute`
   "source": "AiDecisionMakingBackend"
 }
 ```
-

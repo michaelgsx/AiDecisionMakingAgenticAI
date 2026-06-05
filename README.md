@@ -16,7 +16,7 @@ The orchestrator is implemented end-to-end:
 |------------|--------------|-------|
 | **Workflow cache** | Reuses a previously planned DAG for a repeated question instead of re-calling the LLM planner. | `PlannerWorkflowCacheService`, `planner_workflow_cache` |
 | **Planner** | Azure OpenAI builds a tool DAG from the question + tool registry (JSON-only contract), with a default-DAG fallback. | `WorkflowPlannerService`, `WorkflowPlannerPromptBuilder` |
-| **Executor** | Runs the DAG wave-by-wave, dependency-ordered, invoking each tool over HTTP at its `endpointUrl`; handles retries and async (poll / human-in-the-loop) steps. | `WorkflowExecutor`, `WorkflowStepRunner`, `HttpToolInvoker` |
+| **Executor** | Runs the DAG wave-by-wave, dependency-ordered, invoking each tool over HTTP at its `endpointUrl`; adaptive retries and async (poll / human-in-the-loop) steps. | `WorkflowExecutor`, `WorkflowStepRunner`, `HttpToolInvoker` |
 | **Validator** | Validates the DAG before execution: registry-only tools, unique ids, acyclic deps, `llm_answer` last, step limit. | `WorkflowDagValidator`, `WorkflowValidationService` |
 | **Status management** | Tracks a fine-grained phase per run (`planning → executing/{step}/{tool} → llm-answering → done/failed`) for both sync and async calls. | `AsyncChatStatusService`, `async_chat_status`, derived `statusDetail` on `GET /agent/runs/{runId}` |
 | **Dead-task revival** | Sweeps `async_chat_status` for zombie tasks (non-terminal status with no `updated_at` progress within `stale-task-threshold-ms`, default 5m); atomically bumps `updated_at` to claim the row, then re-drives `processRun` so crashed workers or deploys do not leave runs stuck. `OrchestratorWorker` also polls `PLANNING` runs. | `DeadTaskRevivalWorker`, `AsyncChatStatusService.claimForRevival`, `app.orchestrator.stale-task-threshold-ms` |
@@ -392,6 +392,8 @@ Source: `ToolJsonSchemas.java` + `BuiltinToolCatalog.java`. Runtime executors ar
 
 ## Registered tools
 
+Per-tool docs: [`docs/tools/`](./docs/tools/README.md).
+
 | Tool | Mode | Description |
 |------|------|-------------|
 | `data_acquisition` | SYNC | Two-phase LLM: `schema_catalog_table` index → pick tables → columns + `schema_catalog_foreign_key` → SQL → context rows |
@@ -598,7 +600,7 @@ cd backend
 ./mvnw test
 ```
 
-Covers workflow DAG validation, Mermaid rendering, schema catalog / data acquisition / NL2SQL, tool registry & operations, and workflow diagram REST (`@WebMvcTest`).
+Covers workflow DAG validation, Mermaid rendering, schema catalog / data acquisition / NL2SQL, tool registry & operations, adaptive step retry, dead-task revival, user table ACL, and workflow diagram REST (`@WebMvcTest`).
 
 ## Build JAR
 
