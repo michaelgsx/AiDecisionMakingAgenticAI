@@ -4,7 +4,27 @@ Spring Boot **orchestrator + tool registry** API for risk-control Q&A. Deployed 
 
 Companion UI: **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisionMakingQAFront)** (SWA **`ai-rag-agentic-qa`**).
 
+**🔗 Live demo (UI):** https://yellow-island-0fefe051e.7.azurestaticapps.net/
+
 > **Synthetic data:** Schema catalog text, seed risk rows, and demo evaluations are AI-generated for development only.
+
+## Orchestrator capabilities
+
+The orchestrator is implemented end-to-end:
+
+| Capability | What it does | Where |
+|------------|--------------|-------|
+| **Workflow cache** | Reuses a previously planned DAG for a repeated question instead of re-calling the LLM planner. | `PlannerWorkflowCacheService`, `planner_workflow_cache` |
+| **Planner** | Azure OpenAI builds a tool DAG from the question + tool registry (JSON-only contract), with a default-DAG fallback. | `WorkflowPlannerService`, `WorkflowPlannerPromptBuilder` |
+| **Executor** | Runs the DAG wave-by-wave, dependency-ordered, invoking each tool over HTTP at its `endpointUrl`; handles retries and async (poll / human-in-the-loop) steps. | `WorkflowExecutor`, `WorkflowStepRunner`, `HttpToolInvoker` |
+| **Validator** | Validates the DAG before execution: registry-only tools, unique ids, acyclic deps, `llm_answer` last, step limit. | `WorkflowDagValidator`, `WorkflowValidationService` |
+| **Status management** | Tracks a fine-grained phase per run (`planning → executing/{step}/{tool} → llm-answering → done/failed`) for both sync and async calls. | `AsyncChatStatusService`, `async_chat_status`, derived `statusDetail` on `GET /agent/runs/{runId}` |
+| **Step observability** | Persists every step's status, attempts, inputs/outputs, timings, and errors; exposes them plus a live Mermaid DAG for polling. This is the **auditability** foundation — a durable, queryable trail of *what* ran, *when*, and *with what outcome* for each orchestrator run. | `orchestrator_step`, `orchestrator_run`, `OrchestratorRunAssembler`, `GET /agent/runs/{runId}` + `/workflow-diagram` |
+
+### Next step
+
+- **Authentication control** — per-user/role access to runs, tools, and the evaluation queue (today the API uses an optional shared `OPS_TOKEN` bearer; the next iteration adds proper authn).
+- **Short / long-term memory strategy** — how the orchestrator retains and recalls context across turns (conversation-scoped short-term state vs. durable long-term knowledge for planning and tool execution).
 
 ## Screenshots
 
