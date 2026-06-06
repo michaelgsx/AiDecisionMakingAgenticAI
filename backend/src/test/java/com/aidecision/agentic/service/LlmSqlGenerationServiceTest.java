@@ -27,6 +27,8 @@ class LlmSqlGenerationServiceTest {
     @Mock
     private UserTableAccessService userTableAccess;
     @Mock
+    private ReadOnlySqlValidator sqlValidator;
+    @Mock
     private RestClient http;
 
     @InjectMocks

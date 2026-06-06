@@ -17,6 +17,11 @@ public class QaEvaluation {
     public static final String STATUS_ACCEPTED = "ACCEPTED";
     public static final String STATUS_REJECTED = "REJECTED";
 
+    public static final String SCOPE_RUN = "RUN";
+    public static final String SCOPE_STEP = "STEP";
+    /** Sentinel step_key for end-to-end (run-level) evaluation rows. */
+    public static final String RUN_STEP_KEY = "__run__";
+
     @Id
     @Column(name = "evaluation_id", columnDefinition = "uniqueidentifier")
     private UUID evaluationId;
@@ -29,6 +34,21 @@ public class QaEvaluation {
 
     @Column(name = "answer_text", nullable = false, columnDefinition = "nvarchar(max)")
     private String answerText;
+
+    @Column(name = "evaluation_scope", nullable = false, length = 8)
+    private String evaluationScope = SCOPE_RUN;
+
+    @Column(name = "step_key", nullable = false, length = 64)
+    private String stepKey = RUN_STEP_KEY;
+
+    @Column(name = "step_id", columnDefinition = "uniqueidentifier")
+    private UUID stepId;
+
+    @Column(name = "tool_name", length = 64)
+    private String toolName;
+
+    @Column(name = "confidence", nullable = false)
+    private double confidence = 0.5;
 
     @Column(name = "review_status", nullable = false, length = 16)
     private String reviewStatus;
@@ -64,6 +84,21 @@ public class QaEvaluation {
 
     public String getAnswerText() { return answerText; }
     public void setAnswerText(String answerText) { this.answerText = answerText; }
+
+    public String getEvaluationScope() { return evaluationScope; }
+    public void setEvaluationScope(String evaluationScope) { this.evaluationScope = evaluationScope; }
+
+    public String getStepKey() { return stepKey; }
+    public void setStepKey(String stepKey) { this.stepKey = stepKey; }
+
+    public UUID getStepId() { return stepId; }
+    public void setStepId(UUID stepId) { this.stepId = stepId; }
+
+    public String getToolName() { return toolName; }
+    public void setToolName(String toolName) { this.toolName = toolName; }
+
+    public double getConfidence() { return confidence; }
+    public void setConfidence(double confidence) { this.confidence = confidence; }
 
     public String getReviewStatus() { return reviewStatus; }
     public void setReviewStatus(String reviewStatus) { this.reviewStatus = reviewStatus; }

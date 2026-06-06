@@ -1,5 +1,6 @@
 package com.aidecision.agentic.service;
 
+import com.aidecision.agentic.evaluation.EvaluationConfidenceExtractor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -26,8 +27,9 @@ public class DataAcquisitionPlannerService {
             You pick database tables needed to answer a risk/QA question.
             You receive ONLY a table index (name + description). Pick the minimal set \
             that can answer the question; include extra tables only when JOINs are required.
-            Output ONLY JSON: {"tables":["table_a","table_b"],"reason":"one sentence"}.
-            Rules: table names must come from the index; at least one table; at most 6 tables.
+            Output ONLY JSON: {"tables":["table_a","table_b"],"reason":"one sentence","confidence":0.0-1.0}.
+            Rules: table names must come from the index; at least one table; at most 6 tables; \
+            confidence is your certainty that these tables suffice to answer the question.
             """;
 
     private static final String SQL_SYSTEM_TEMPLATE = """
@@ -38,6 +40,7 @@ public class DataAcquisitionPlannerService {
             Return context rows (TOP N), not chart aggregates unless the question asks for counts.
             Output ONLY the SQL (no markdown fences, no explanation).
             Rules: single SELECT; no semicolons; use TOP %d or less; read-only.
+            NEVER use COUNT(DISTINCT ...) OVER () — use a CTE or scalar subquery instead.
             """;
 
     private final LlmSqlGenerationService llm;
@@ -53,16 +56,19 @@ public class DataAcquisitionPlannerService {
         this.mapper = mapper;
     }
 
-    public record TableSelection(List<String> tables, String reason) {}
+    public record TableSelection(List<String> tables, String reason, double confidence) {}
 
     public TableSelection selectTables(String question, List<String> candidates) throws Exception {
         if (candidates == null || candidates.isEmpty()) {
-            return new TableSelection(List.of(), "No candidate tables after user ACL.");
+            return new TableSelection(List.of(), "No candidate tables after user ACL.", 0.0);
         }
         Set<String> allowed = new HashSet<>(candidates);
 
         if (!llm.isChatConfigured()) {
-            return new TableSelection(new ArrayList<>(candidates), "LLM unavailable; using scenario catalog tables.");
+            return new TableSelection(
+                    new ArrayList<>(candidates),
+                    "LLM unavailable; using scenario catalog tables.",
+                    0.5);
         }
 
         String index = catalog.buildTableIndexText(candidates);
@@ -109,7 +115,22 @@ public class DataAcquisitionPlannerService {
         if (reason.isBlank()) {
             reason = "Selected " + deduped.size() + " table(s) from catalog index.";
         }
-        return new TableSelection(List.copyOf(deduped), reason);
+        double confidence = parseConfidence(node.path("confidence"));
+        return new TableSelection(List.copyOf(deduped), reason, confidence);
+    }
+
+    private static double parseConfidence(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return EvaluationConfidenceExtractor.DEFAULT_CONFIDENCE;
+        }
+        if (node.isNumber()) {
+            return EvaluationConfidenceExtractor.clamp(node.asDouble());
+        }
+        try {
+            return EvaluationConfidenceExtractor.clamp(Double.parseDouble(node.asText().trim()));
+        } catch (NumberFormatException e) {
+            return EvaluationConfidenceExtractor.DEFAULT_CONFIDENCE;
+        }
     }
 
     static String extractJsonPayload(String raw) {

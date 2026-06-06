@@ -25,5 +25,6 @@ public class ReadOnlySqlValidator {
         if (FORBIDDEN.matcher(trimmed).find()) {
             throw new IllegalArgumentException("Query contains forbidden keywords");
         }
+        SqlServerSyntaxRules.validate(trimmed);
     }
 }

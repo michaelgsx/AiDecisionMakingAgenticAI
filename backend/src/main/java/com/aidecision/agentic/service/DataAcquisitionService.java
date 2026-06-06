@@ -53,6 +53,7 @@ public class DataAcquisitionService {
                 candidates,
                 selected,
                 selection.reason(),
+                selection.confidence(),
                 sql,
                 rows,
                 rows.size(),
@@ -94,6 +95,7 @@ public class DataAcquisitionService {
         features.put("candidateTables", candidateTables);
         features.put("tables", selection.tables());
         features.put("tableSelectionReason", selection.reason());
+        features.put("confidence", selection.confidence());
         features.put("rowCount", rows.size());
         if (!rows.isEmpty()) {
             features.put("sample", rows.get(0));
@@ -109,6 +111,7 @@ public class DataAcquisitionService {
             List<String> candidateTables,
             List<String> tables,
             String tableSelectionReason,
+            double confidence,
             String sql,
             List<Map<String, Object>> rows,
             int rowCount,

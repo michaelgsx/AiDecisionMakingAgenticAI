@@ -40,9 +40,21 @@ class DataAcquisitionPlannerServiceTest {
 
         assertThat(sel.tables()).containsExactly("risk_features", "risk_decisions");
         assertThat(sel.reason()).contains("case");
+        assertThat(sel.confidence()).isEqualTo(0.5);
     }
 
     @Test
+    void parseTableSelection_readsConfidenceFromJson() throws Exception {
+        Set<String> allowed = new LinkedHashSet<>(List.of("risk_features"));
+        String raw = """
+                {"tables":["risk_features"],"reason":"need case","confidence":0.85}
+                """;
+
+        DataAcquisitionPlannerService.TableSelection sel =
+                planner.parseTableSelection(raw, allowed);
+
+        assertThat(sel.confidence()).isEqualTo(0.85);
+    }
     void selectTables_withoutLlm_returnsCandidates() throws Exception {
         when(llm.isChatConfigured()).thenReturn(false);
         List<String> candidates = List.of("risk_features", "activity_log");

@@ -34,6 +34,7 @@ class DataAcquisitionToolTest {
                         List.of("risk_features", "risk_decisions"),
                         List.of("risk_features"),
                         "need case rows",
+                        0.8,
                         "SELECT TOP 1 * FROM dbo.risk_features",
                         List.of(Map.of("user_id", "u1")),
                         1,

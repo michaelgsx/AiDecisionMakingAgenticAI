@@ -38,10 +38,12 @@ public class NaturalLanguageToSqlTool implements AgentTool {
         try {
             String sql = nl2Sql.generateSql(question, ctx.userId());
             var rows = sqlExecutor.executeSelect(sql, maxRows);
+            double confidence = rows.isEmpty() ? 0.35 : 0.75;
             return ToolResult.ok(Map.of(
                     "sql", sql,
                     "rows", rows,
                     "rowCount", rows.size(),
+                    "confidence", confidence,
                     "summary", "Executed read-only query; returned " + rows.size() + " row(s)."
             ));
         } catch (Exception e) {

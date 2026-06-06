@@ -1,6 +1,7 @@
 package com.aidecision.agentic.integration;
 
 import com.aidecision.agentic.config.RagApiProperties;
+import com.aidecision.agentic.evaluation.EvaluationConfidenceExtractor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpHeaders;
@@ -65,6 +66,18 @@ public class RagAssessClient {
         out.put("searchReason", json.path("reason").asText(""));
         out.put("aiLabel", json.path("aiLabel").asText(""));
         out.put("aiReason", json.path("aiReason").asText(""));
+        if (json.has("aiConfidence") && !json.path("aiConfidence").isNull()) {
+            out.put("aiConfidence", json.path("aiConfidence").asDouble());
+            out.put("confidence", EvaluationConfidenceExtractor.clamp(json.path("aiConfidence").asDouble()));
+        } else if (!hits.isEmpty()) {
+            double maxScore = hits.stream()
+                    .mapToDouble(h -> ((Number) h.getOrDefault("score", 0)).doubleValue())
+                    .max()
+                    .orElse(0.5);
+            out.put("confidence", EvaluationConfidenceExtractor.clamp(maxScore));
+        } else {
+            out.put("confidence", EvaluationConfidenceExtractor.DEFAULT_CONFIDENCE);
+        }
         out.put("hits", hits);
         out.put("summary", "AiDecision RAG assess returned " + hits.size() + " similar records.");
         out.put("source", "AiDecisionMakingBackend");

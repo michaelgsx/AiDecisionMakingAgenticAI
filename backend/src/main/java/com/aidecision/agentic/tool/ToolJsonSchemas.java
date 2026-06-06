@@ -61,7 +61,11 @@ final class ToolJsonSchemas {
                   "type": "object",
                   "description": "Summary bundle: scenario, tables, rowCount, sample first row for RAG metadata."
                 },
-                "note": { "type": "string", "description": "Human-readable acquisition summary." }
+                "note": { "type": "string", "description": "Human-readable acquisition summary." },
+                "confidence": {
+                  "type": "number",
+                  "description": "Phase-1 LLM certainty (0–1) that selected tables answer the question."
+                }
               }
             }
             """;
@@ -105,7 +109,11 @@ final class ToolJsonSchemas {
                   "description": "Similar records: recordId, score, snippet, reviewOutcome, scenario."
                 },
                 "summary": { "type": "string", "description": "One-line tool summary for logs." },
-                "source": { "type": "string", "description": "AiDecisionMakingBackend or demo." }
+                "source": { "type": "string", "description": "AiDecisionMakingBackend or demo." },
+                "confidence": {
+                  "type": "number",
+                  "description": "Model/search certainty (0–1); from aiConfidence or top hit score."
+                }
               }
             }
             """;
@@ -139,7 +147,11 @@ final class ToolJsonSchemas {
                   "type": "integer",
                   "description": "Number of rows returned. 0 means no data — adjust question or skip llm_answer claims."
                 },
-                "summary": { "type": "string", "description": "Short execution summary." }
+                "summary": { "type": "string", "description": "Short execution summary." },
+                "confidence": {
+                  "type": "number",
+                  "description": "Heuristic certainty (0–1) that SQL results answer the question."
+                }
               }
             }
             """;
@@ -180,7 +192,11 @@ final class ToolJsonSchemas {
                   "description": "true if decision=accept; false if reject. Primary branch flag."
                 },
                 "comment": { "type": "string", "description": "Optional reviewer comment." },
-                "summary": { "type": "string", "description": "Short outcome summary." }
+                "summary": { "type": "string", "description": "Short outcome summary." },
+                "confidence": {
+                  "type": "number",
+                  "description": "1.0 after human responds; lower while WAITING."
+                }
               }
             }
             """;
@@ -201,9 +217,13 @@ final class ToolJsonSchemas {
                 "answer": {
                   "type": "string",
                   "description": "Complete natural-language response to the original user question."
+                },
+                "confidence": {
+                  "type": "number",
+                  "description": "LLM certainty (0–1) that the answer is supported by prior step outputs."
                 }
               },
-              "required": ["answer"]
+              "required": ["answer", "confidence"]
             }
             """;
 }

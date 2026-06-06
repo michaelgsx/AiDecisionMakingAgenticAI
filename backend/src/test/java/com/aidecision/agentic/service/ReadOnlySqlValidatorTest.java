@@ -32,4 +32,13 @@ class ReadOnlySqlValidatorTest {
         assertThatThrownBy(() -> validator.validate("SELECT * INTO #tmp FROM dbo.risk_features DROP TABLE #tmp"))
                 .hasMessageContaining("forbidden");
     }
+
+    @Test
+    void countDistinctOver_fails() {
+        assertThatThrownBy(() -> validator.validate("""
+                SELECT TOP 100 COUNT(DISTINCT rf.user_id) OVER () AS total, rf.user_id
+                FROM dbo.risk_features rf GROUP BY rf.user_id
+                """))
+                .hasMessageContaining("COUNT(DISTINCT");
+    }
 }

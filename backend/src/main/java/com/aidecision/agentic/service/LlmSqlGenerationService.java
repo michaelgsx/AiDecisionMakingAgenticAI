@@ -22,10 +22,16 @@ public class LlmSqlGenerationService {
             Pattern.compile("```(?:sql)?\\s*([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
 
     private static final String ANALYTICS_SYSTEM = """
-            You write Microsoft SQL Server SELECT-only queries for risk analytics.
+            You write Microsoft SQL Server T-SQL SELECT-only queries for risk analytics.
             Use ONLY tables and columns from the schema catalog below.
             Output ONLY the SQL (no markdown fences, no explanation).
-            Rules: single SELECT; no semicolons; use TOP 100 or less; read-only.
+            Rules:
+            - single SELECT; no semicolons; use TOP 100 or less; read-only.
+            - NEVER use COUNT(DISTINCT ...) OVER () — SQL Server rejects it.
+            - For "how many X and list them": use a CTE, e.g.
+              WITH items AS (SELECT DISTINCT col FROM t WHERE col IS NOT NULL)
+              SELECT TOP 100 col, (SELECT COUNT(*) FROM items) AS total_count FROM items ORDER BY col.
+            - Use GROUP BY for aggregates; use CTEs/subqueries instead of unsupported window DISTINCT.
             """;
 
     private static final String DATA_ACQUISITION_SYSTEM = """
@@ -48,6 +54,7 @@ public class LlmSqlGenerationService {
     private final AzureOpenAiProperties openAi;
     private final SchemaCatalogService catalog;
     private final UserTableAccessService userTableAccess;
+    private final ReadOnlySqlValidator sqlValidator;
     private final ObjectMapper mapper;
     private final RestClient http;
 
@@ -55,11 +62,13 @@ public class LlmSqlGenerationService {
             AzureOpenAiProperties openAi,
             SchemaCatalogService catalog,
             UserTableAccessService userTableAccess,
+            ReadOnlySqlValidator sqlValidator,
             ObjectMapper mapper,
             RestClient http) {
         this.openAi = openAi;
         this.catalog = catalog;
         this.userTableAccess = userTableAccess;
+        this.sqlValidator = sqlValidator;
         this.mapper = mapper;
         this.http = http;
     }
@@ -82,8 +91,23 @@ public class LlmSqlGenerationService {
                 + "\n\nUser question:\n"
                 + question;
 
-        String raw = chatComplete(system, user, 1024, 0.1);
-        return extractSql(raw);
+        return generateValidatedSql(system, user);
+    }
+
+    private String generateValidatedSql(String system, String user) throws Exception {
+        String sql = extractSql(chatComplete(system, user, 1024, 0.1));
+        try {
+            sqlValidator.validate(sql);
+            return sql;
+        } catch (IllegalArgumentException first) {
+            String retryUser = user
+                    + "\n\nPrevious SQL was rejected for SQL Server: "
+                    + first.getMessage()
+                    + "\nRegenerate valid T-SQL only (never COUNT(DISTINCT ...) OVER ()).";
+            sql = extractSql(chatComplete(system, retryUser, 1024, 0.0));
+            sqlValidator.validate(sql);
+            return sql;
+        }
     }
 
     /** Used by {@link DataAcquisitionPlannerService} when Azure OpenAI is not configured. */

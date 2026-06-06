@@ -39,7 +39,7 @@ class DataAcquisitionServiceTest {
                 .thenAnswer(inv -> inv.getArgument(1));
         when(planner.selectTables(eq("freeze withdrawal?"), any()))
                 .thenReturn(new DataAcquisitionPlannerService.TableSelection(
-                        List.of("risk_features", "risk_decisions"), "case and decision"));
+                        List.of("risk_features", "risk_decisions"), "case and decision", 0.82));
         when(planner.generateSql(eq("freeze withdrawal?"), eq(List.of("risk_features", "risk_decisions")), eq(20)))
                 .thenReturn("SELECT TOP 5 * FROM dbo.risk_features");
         when(sqlExecutor.executeSelect(any(), eq(20)))
@@ -74,7 +74,7 @@ class DataAcquisitionServiceTest {
                 .thenReturn(List.of("risk_features"));
         when(planner.selectTables(eq("freeze?"), eq(List.of("risk_features"))))
                 .thenReturn(new DataAcquisitionPlannerService.TableSelection(
-                        List.of("risk_features"), "ok"));
+                        List.of("risk_features"), "ok", 0.9));
         when(planner.generateSql(eq("freeze?"), eq(List.of("risk_features")), eq(10)))
                 .thenReturn("SELECT TOP 3 * FROM dbo.risk_features");
         when(sqlExecutor.executeSelect(any(), eq(10))).thenReturn(List.of());

@@ -49,6 +49,7 @@ public class DataAcquisitionTool implements AgentTool {
                     "candidateTables", result.candidateTables(),
                     "tables", result.tables(),
                     "tableSelectionReason", result.tableSelectionReason(),
+                    "confidence", result.confidence(),
                     "sql", result.sql(),
                     "rows", result.rows(),
                     "rowCount", result.rowCount(),

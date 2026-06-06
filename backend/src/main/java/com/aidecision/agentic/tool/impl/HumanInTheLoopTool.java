@@ -52,7 +52,8 @@ public class HumanInTheLoopTool implements AsyncAgentTool {
                 "stepKey", ctx.stepKey(),
                 "prompt", prompt,
                 "proposal", proposal,
-                "status", HumanInLoopService.STATUS_WAITING
+                "status", HumanInLoopService.STATUS_WAITING,
+                "confidence", 0.5
         ));
     }
 
@@ -84,6 +85,7 @@ public class HumanInTheLoopTool implements AsyncAgentTool {
         out.put("accepted", accepted);
         out.put("comment", current.getComment() == null ? "" : current.getComment());
         out.put("summary", accepted ? "User accepted the proposal." : "User rejected the proposal.");
+        out.put("confidence", 1.0);
         return ToolResult.ok(out);
     }
 

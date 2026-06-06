@@ -11,6 +11,8 @@ public interface QaEvaluationRepository extends JpaRepository<QaEvaluation, UUID
 
     boolean existsByRunId(UUID runId);
 
+    boolean existsByRunIdAndStepKey(UUID runId, String stepKey);
+
     Optional<QaEvaluation> findByRunId(UUID runId);
 
     List<QaEvaluation> findByReviewStatusOrderByCreatedAtDesc(String reviewStatus);

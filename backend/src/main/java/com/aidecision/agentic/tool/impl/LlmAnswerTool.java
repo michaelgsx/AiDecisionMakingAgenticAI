@@ -1,6 +1,7 @@
 package com.aidecision.agentic.tool.impl;
 
 import com.aidecision.agentic.config.AzureOpenAiProperties;
+import com.aidecision.agentic.evaluation.EvaluationConfidenceExtractor;
 import com.aidecision.agentic.tool.AgentTool;
 import com.aidecision.agentic.tool.ToolExecutionContext;
 import com.aidecision.agentic.tool.ToolResult;
@@ -18,6 +19,12 @@ import java.util.stream.Collectors;
 
 @Component
 public class LlmAnswerTool implements AgentTool {
+
+    private static final String SYSTEM_PROMPT = """
+            You are a risk-control Q&A assistant. Use tool outputs in context.
+            Respond with JSON only: {"answer":"<complete natural-language reply>","confidence":0.0-1.0}.
+            confidence is your certainty that the answer is well supported by the tool context (1.0 = fully supported).
+            """;
 
     private final AzureOpenAiProperties props;
     private final ObjectMapper mapper;
@@ -43,16 +50,30 @@ public class LlmAnswerTool implements AgentTool {
         if (!props.chatConfigured()) {
             return ToolResult.ok(Map.of(
                     "answer",
-                    "(Demo) Based on prior steps:\n" + prior + "\n\nQuestion: " + ctx.question()
-            ));
+                    "(Demo) Based on prior steps:\n" + prior + "\n\nQuestion: " + ctx.question(),
+                    "confidence", 0.5));
         }
 
         try {
-            String answer = callChat(ctx.question(), prior);
-            return ToolResult.ok(Map.of("answer", answer));
+            String raw = callChat(ctx.question(), prior);
+            return ToolResult.ok(parseAnswerPayload(raw));
         } catch (Exception e) {
             return ToolResult.fail(e.getMessage());
         }
+    }
+
+    private Map<String, Object> parseAnswerPayload(String raw) throws Exception {
+        String trimmed = raw == null ? "" : raw.trim();
+        if (trimmed.startsWith("{")) {
+            JsonNode node = mapper.readTree(trimmed);
+            String answer = node.path("answer").asText("").trim();
+            if (answer.isBlank()) {
+                answer = trimmed;
+            }
+            double confidence = EvaluationConfidenceExtractor.clamp(node.path("confidence").asDouble(0.5));
+            return Map.of("answer", answer, "confidence", confidence);
+        }
+        return Map.of("answer", trimmed, "confidence", 0.5);
     }
 
     private String callChat(String question, String context) throws Exception {
@@ -62,9 +83,9 @@ public class LlmAnswerTool implements AgentTool {
 
         ObjectNode root = mapper.createObjectNode();
         root.put("max_completion_tokens", 2048);
+        root.putObject("response_format").put("type", "json_object");
         ArrayNode messages = root.putArray("messages");
-        messages.addObject().put("role", "system").put("content",
-                "You are a risk-control Q&A assistant. Use tool outputs in context.");
+        messages.addObject().put("role", "system").put("content", SYSTEM_PROMPT);
         messages.addObject().put("role", "user").put("content",
                 "Question:\n" + question + "\n\nTool context:\n" + context);
 
