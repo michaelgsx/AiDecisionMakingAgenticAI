@@ -90,13 +90,14 @@ public class WorkflowPlannerPromptBuilder {
                 wave concurrently.
                 - llm_answer MUST depend on every upstream data step (dependsOn lists all NL2SQL step ids) \
                 and synthesize the full answer from their outputs.
-                - Example — "how many distinct user ids do we have, and list them":
-                  s1 natural_language_to_sql params.question="How many distinct user ids are there?" dependsOn=[]
-                  s2 natural_language_to_sql params.question="List all distinct user ids." dependsOn=[] \
-                  (omit TOP in SQL for list-all; maxRows caps rows at runtime)
-                  s3 llm_answer dependsOn=["s1","s2"]
-                - Apply the same split for other compound patterns (count + list, aggregate + detail rows, \
-                two separate metrics joined by "and" / "also" / "plus").
+                - Decomposition pattern (adapt sub-questions to the user's actual entities and metrics):
+                  s1 natural_language_to_sql — params.question = the COUNT/aggregate sub-question only; dependsOn=[]
+                  s2 natural_language_to_sql — params.question = the LIST/detail sub-question only; dependsOn=[]
+                  s3 llm_answer — dependsOn=["s1","s2"]
+                  Each params.question must be a standalone English question derived from the user message, \
+                  not copied verbatim when the original combines multiple intents.
+                - Apply the same split for compound patterns: count + list, aggregate + detail rows, \
+                two separate metrics joined by "and" / "also" / "plus".
                 """
                 .formatted(defaultMax, defaultTimeout, maxSteps);
     }

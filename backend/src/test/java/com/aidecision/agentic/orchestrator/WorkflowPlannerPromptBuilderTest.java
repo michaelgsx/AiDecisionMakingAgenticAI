@@ -53,8 +53,10 @@ class WorkflowPlannerPromptBuilderTest {
         assertThat(prompt.systemPrompt()).contains("Compound / multi-part questions");
         assertThat(prompt.systemPrompt()).contains("dependsOn: []");
         assertThat(prompt.systemPrompt()).contains("run in parallel");
-        assertThat(prompt.systemPrompt()).contains("How many distinct user ids are there?");
-        assertThat(prompt.systemPrompt()).contains("List all distinct user ids");
+        assertThat(prompt.systemPrompt()).contains("Decomposition pattern");
+        assertThat(prompt.systemPrompt()).contains("COUNT/aggregate sub-question only");
+        assertThat(prompt.systemPrompt()).contains("LIST/detail sub-question only");
+        assertThat(prompt.systemPrompt()).doesNotContain("distinct user ids");
         assertThat(prompt.outputJsonSchema()).contains("run in parallel");
     }
 
