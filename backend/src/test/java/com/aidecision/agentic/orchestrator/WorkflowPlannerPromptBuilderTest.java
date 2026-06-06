@@ -42,22 +42,23 @@ class WorkflowPlannerPromptBuilderTest {
     }
 
     @Test
-    void systemPrompt_instructsParallelNl2SqlForCompoundQuestions() throws Exception {
+    void systemPrompt_instructsVariableSplitForCompoundQuestions() throws Exception {
         OrchestratorTool nl2sql = sampleTool("natural_language_to_sql");
         nl2sql.setDescription("NL to read-only SQL.");
 
         PlannerPrompt prompt = builder.build(
-                "how many distinct user ids do we have in total? and list them please.",
+                "how many cases were frozen last week, list the top scenarios, and compare to the prior week?",
                 Map.of("natural_language_to_sql", nl2sql, "llm_answer", sampleTool("llm_answer")));
 
         assertThat(prompt.systemPrompt()).contains("Compound / multi-part questions");
+        assertThat(prompt.systemPrompt()).contains("Do NOT assume K=2");
+        assertThat(prompt.systemPrompt()).contains("K may be 1, 2, 3, 4");
         assertThat(prompt.systemPrompt()).contains("dependsOn: []");
-        assertThat(prompt.systemPrompt()).contains("run in parallel");
-        assertThat(prompt.systemPrompt()).contains("Decomposition pattern");
-        assertThat(prompt.systemPrompt()).contains("COUNT/aggregate sub-question only");
-        assertThat(prompt.systemPrompt()).contains("LIST/detail sub-question only");
+        assertThat(prompt.systemPrompt()).contains("parallel");
+        assertThat(prompt.systemPrompt()).contains("variable N");
         assertThat(prompt.systemPrompt()).doesNotContain("distinct user ids");
-        assertThat(prompt.outputJsonSchema()).contains("run in parallel");
+        assertThat(prompt.userPrompt()).contains("compare to the prior week");
+        assertThat(prompt.outputJsonSchema()).contains("count varies");
     }
 
     private static OrchestratorTool sampleTool(String name) {

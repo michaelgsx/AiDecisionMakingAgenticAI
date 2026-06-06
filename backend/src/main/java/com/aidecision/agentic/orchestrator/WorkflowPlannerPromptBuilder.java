@@ -78,26 +78,39 @@ public class WorkflowPlannerPromptBuilder {
                 - Aggregates / counts / analytics SQL: natural_language_to_sql before llm_answer.
                 - Human approval before final answer: human_in_the_loop (ASYNC) before llm_answer.
 
-                Compound / multi-part questions (CRITICAL for natural_language_to_sql):
-                - When the user asks for MORE THAN ONE distinct SQL analytics outcome in one message \
-                (e.g. "how many X … and list them", "count … and show …", "total … plus breakdown by …"), \
-                do NOT pass the full compound sentence to a single natural_language_to_sql step.
-                - natural_language_to_sql allows only ONE read-only SELECT per step (no semicolons, no \
-                multi-statement batches). Split into separate natural_language_to_sql steps — one focused \
-                sub-question per step in params.question.
-                - Independent analytics sub-questions MUST run in parallel: give each step dependsOn: [] \
-                (empty). The executor runs all READY steps with no unsatisfied dependencies in the same \
-                wave concurrently.
-                - llm_answer MUST depend on every upstream data step (dependsOn lists all NL2SQL step ids) \
-                and synthesize the full answer from their outputs.
-                - Decomposition pattern (adapt sub-questions to the user's actual entities and metrics):
-                  s1 natural_language_to_sql — params.question = the COUNT/aggregate sub-question only; dependsOn=[]
-                  s2 natural_language_to_sql — params.question = the LIST/detail sub-question only; dependsOn=[]
-                  s3 llm_answer — dependsOn=["s1","s2"]
-                  Each params.question must be a standalone English question derived from the user message, \
-                  not copied verbatim when the original combines multiple intents.
-                - Apply the same split for compound patterns: count + list, aggregate + detail rows, \
-                two separate metrics joined by "and" / "also" / "plus".
+                Compound / multi-part questions (CRITICAL):
+                Before planning, enumerate every DISTINCT outcome the user wants — counts, lists, \
+                breakdowns, comparisons, time windows, filters, or separate metrics. Signals of \
+                multiple outcomes include "and", "also", "plus", "as well as", semicolons, commas \
+                between requests, numbered sub-questions, or "both X and Y".
+
+                Splitting rule (natural_language_to_sql and mixed data steps):
+                - Each natural_language_to_sql step = exactly ONE read-only SELECT (no semicolons).
+                - If the user needs K distinct SQL analytics outcomes, create K natural_language_to_sql \
+                steps (K may be 1, 2, 3, 4, or more up to the step limit). Do NOT assume K=2.
+                - Never pass the full compound sentence to a single NL2SQL step.
+                - Each params.question = one standalone sub-question for ONE outcome only; derive it \
+                from the user message, do not copy the whole compound sentence verbatim.
+                - Other tools follow the same idea: one focused sub-task per step (e.g. separate \
+                data_acquisition lookups or RAG queries when sub-intents differ).
+
+                Parallel vs sequential dependsOn:
+                - Sub-intents that do NOT need another step's result rows → dependsOn: [] \
+                (executor runs them in the same parallel wave).
+                - Sub-intent B only makes sense after A (e.g. "breakdown of those frozen cases", \
+                "for the users from step 1") → B dependsOn the step(s) it needs.
+                - When dependency is unclear, prefer parallel [] unless wording clearly references \
+                prior results ("those", "them", "above", "from that set").
+
+                Finishing the DAG:
+                - llm_answer is always the last step when available.
+                - llm_answer dependsOn must list EVERY upstream data-gathering step id (all NL2SQL, \
+                data_acquisition, RAG, etc. whose outputs the final answer needs).
+                - Single-intent questions: one data step + llm_answer is enough; do not over-split.
+
+                Shape (variable N — adapt ids and count to the user message, no fixed template):
+                  s1..sN — one data tool step per distinct sub-intent; parallel when independent
+                  s(N+1) llm_answer — dependsOn all of s1..sN (or the sequential chain tail)
                 """
                 .formatted(defaultMax, defaultTimeout, maxSteps);
     }
@@ -158,7 +171,8 @@ public class WorkflowPlannerPromptBuilder {
 
         ObjectNode steps = props.putObject("steps");
         steps.put("type", "array");
-        steps.put("description", "Required when status=ok: ordered DAG steps for the executor");
+        steps.put("description", "Required when status=ok: DAG steps (count varies — one data step "
+                + "per distinct sub-intent, then llm_answer last)");
         ObjectNode stepItem = steps.putObject("items");
         stepItem.put("type", "object");
         ObjectNode stepProps = stepItem.putObject("properties");
