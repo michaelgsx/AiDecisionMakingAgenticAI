@@ -35,6 +35,7 @@ public class WorkflowPlannerService {
     private final WorkflowDagValidator validator;
     private final WorkflowPlannerPromptBuilder promptBuilder;
     private final PlannerWorkflowCacheService workflowCache;
+    private final CompoundWorkflowExpander compoundExpander;
     private final ObjectMapper mapper;
     private final RestClient http;
 
@@ -45,6 +46,7 @@ public class WorkflowPlannerService {
             WorkflowDagValidator validator,
             WorkflowPlannerPromptBuilder promptBuilder,
             PlannerWorkflowCacheService workflowCache,
+            CompoundWorkflowExpander compoundExpander,
             ObjectMapper mapper,
             RestClient http) {
         this.openAi = openAi;
@@ -53,6 +55,7 @@ public class WorkflowPlannerService {
         this.validator = validator;
         this.promptBuilder = promptBuilder;
         this.workflowCache = workflowCache;
+        this.compoundExpander = compoundExpander;
         this.mapper = mapper;
         this.http = http;
     }
@@ -81,9 +84,9 @@ public class WorkflowPlannerService {
                                     : response.message(),
                             response.missingTools());
                 }
-                WorkflowDag dag = response.toDag();
+                WorkflowDag dag = compoundExpander.expandIfNeeded(question, response.toDag(), tools);
                 validator.validate(dag, tools);
-                log.info("LLM planner produced {} step(s)", dag.steps().size());
+                log.info("Planner produced {} step(s) after compound expansion", dag.steps().size());
                 return dag;
             } catch (InsufficientToolsException e) {
                 throw e;

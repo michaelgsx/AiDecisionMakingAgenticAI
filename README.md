@@ -15,6 +15,7 @@ The orchestrator is implemented end-to-end:
 | Capability | What it does | Where |
 |------------|--------------|-------|
 | **Workflow cache** | Reuses a thumbs-up-approved DAG for the same question (skips LLM planner). Entries are written only on `POST /agent/feedback` with `rating=up`, not at plan time. | `PlannerWorkflowCacheService`, `planner_workflow_cache`, `QaFeedbackService` |
+| **Compound expander** | After planning, rule-based split of multi-intent questions into N parallel `natural_language_to_sql` steps when the LLM under-split. | `CompoundQuestionDecomposer`, `CompoundWorkflowExpander` |
 | **Planner** | Azure OpenAI builds a tool DAG from the question + tool registry (JSON-only contract), with a default-DAG fallback. | `WorkflowPlannerService`, `WorkflowPlannerPromptBuilder` |
 | **Executor** | Runs the DAG wave-by-wave, dependency-ordered, invoking each tool over HTTP at its `endpointUrl`; adaptive retries and async (poll / human-in-the-loop) steps. | `WorkflowExecutor`, `WorkflowStepRunner`, `HttpToolInvoker` |
 | **Validator** | Validates the DAG before execution: registry-only tools, unique ids, acyclic deps, `llm_answer` last, step limit. | `WorkflowDagValidator`, `WorkflowValidationService` |
