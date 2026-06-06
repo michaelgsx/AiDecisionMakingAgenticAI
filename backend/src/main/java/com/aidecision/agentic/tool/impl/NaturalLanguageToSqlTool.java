@@ -36,7 +36,7 @@ public class NaturalLanguageToSqlTool implements AgentTool {
         }
 
         try {
-            String sql = nl2Sql.generateSql(question, ctx.userId());
+            String sql = nl2Sql.generateSql(question, ctx.userId(), maxRows);
             var rows = sqlExecutor.executeSelect(sql, maxRows);
             double confidence = rows.isEmpty() ? 0.35 : 0.75;
             return ToolResult.ok(Map.of(

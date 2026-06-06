@@ -20,10 +20,10 @@ public class ReadOnlySqlExecutor {
     }
 
     public List<Map<String, Object>> executeSelect(String sql, int maxRows) {
-        validator.validate(sql);
+        String safeSql = validator.validateAndNormalize(sql);
         int limit = Math.min(Math.max(maxRows, 1), 200);
         List<Map<String, Object>> rows = new ArrayList<>();
-        jdbc.query(sql.trim(), rs -> {
+        jdbc.query(safeSql, rs -> {
             if (rows.size() >= limit) {
                 return;
             }

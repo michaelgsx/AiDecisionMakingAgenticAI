@@ -93,7 +93,7 @@ public class WorkflowPlannerPromptBuilder {
                 - Example — "how many distinct user ids do we have, and list them":
                   s1 natural_language_to_sql params.question="How many distinct user ids are there?" dependsOn=[]
                   s2 natural_language_to_sql params.question="List all distinct user ids." dependsOn=[] \
-                  (use maxRows 100+ if listing)
+                  (omit TOP in SQL for list-all; maxRows caps rows at runtime)
                   s3 llm_answer dependsOn=["s1","s2"]
                 - Apply the same split for other compound patterns (count + list, aggregate + detail rows, \
                 two separate metrics joined by "and" / "also" / "plus").

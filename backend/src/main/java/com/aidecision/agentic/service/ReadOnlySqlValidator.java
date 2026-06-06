@@ -12,10 +12,15 @@ public class ReadOnlySqlValidator {
             Pattern.CASE_INSENSITIVE);
 
     public void validate(String sql) {
+        validateAndNormalize(sql);
+    }
+
+    /** Validates read-only T-SQL and returns syntax-normalized SQL safe to execute. */
+    public String validateAndNormalize(String sql) {
         if (sql == null || sql.isBlank()) {
             throw new IllegalArgumentException("SQL is empty");
         }
-        String trimmed = sql.trim();
+        String trimmed = SqlServerSyntaxRules.normalize(sql.trim());
         if (trimmed.contains(";")) {
             throw new IllegalArgumentException("Only a single SELECT statement is allowed (no semicolons)");
         }
@@ -26,5 +31,6 @@ public class ReadOnlySqlValidator {
             throw new IllegalArgumentException("Query contains forbidden keywords");
         }
         SqlServerSyntaxRules.validate(trimmed);
+        return trimmed;
     }
 }

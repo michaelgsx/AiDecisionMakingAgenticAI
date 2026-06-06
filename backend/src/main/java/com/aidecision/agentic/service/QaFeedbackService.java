@@ -4,6 +4,8 @@ import com.aidecision.agentic.dto.FeedbackRequest;
 import com.aidecision.agentic.dto.FeedbackResponse;
 import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.entity.QaFeedback;
+import com.aidecision.agentic.orchestrator.RunStatus;
+import com.aidecision.agentic.orchestrator.WorkflowPlannerService;
 import com.aidecision.agentic.repository.OrchestratorRunRepository;
 import com.aidecision.agentic.repository.QaFeedbackRepository;
 import org.springframework.stereotype.Service;
@@ -16,10 +18,15 @@ public class QaFeedbackService {
 
     private final QaFeedbackRepository feedback;
     private final OrchestratorRunRepository runs;
+    private final WorkflowPlannerService planner;
 
-    public QaFeedbackService(QaFeedbackRepository feedback, OrchestratorRunRepository runs) {
+    public QaFeedbackService(
+            QaFeedbackRepository feedback,
+            OrchestratorRunRepository runs,
+            WorkflowPlannerService planner) {
         this.feedback = feedback;
         this.runs = runs;
+        this.planner = planner;
     }
 
     @Transactional
@@ -43,7 +50,18 @@ public class QaFeedbackService {
         row.setComment(blankToNull(request.comment()));
         feedback.save(row);
 
-        return new FeedbackResponse(true, row.getFeedbackId().toString(), "Feedback recorded");
+        boolean workflowCached = false;
+        if ("up".equals(rating)) {
+            planner.cacheWorkflowFromThumbsUp(run);
+            workflowCached = RunStatus.COMPLETED.name().equals(run.getStatus())
+                    && run.getWorkflowJson() != null
+                    && !run.getWorkflowJson().isBlank();
+        }
+
+        String message = workflowCached
+                ? "Feedback recorded. Workflow saved for similar questions."
+                : "Feedback recorded.";
+        return new FeedbackResponse(true, row.getFeedbackId().toString(), message);
     }
 
     private static String blankToNull(String s) {

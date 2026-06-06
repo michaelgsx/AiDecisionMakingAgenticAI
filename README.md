@@ -14,7 +14,7 @@ The orchestrator is implemented end-to-end:
 
 | Capability | What it does | Where |
 |------------|--------------|-------|
-| **Workflow cache** | Reuses a previously planned DAG for a repeated question instead of re-calling the LLM planner. | `PlannerWorkflowCacheService`, `planner_workflow_cache` |
+| **Workflow cache** | Reuses a thumbs-up-approved DAG for the same question (skips LLM planner). Entries are written only on `POST /agent/feedback` with `rating=up`, not at plan time. | `PlannerWorkflowCacheService`, `planner_workflow_cache`, `QaFeedbackService` |
 | **Planner** | Azure OpenAI builds a tool DAG from the question + tool registry (JSON-only contract), with a default-DAG fallback. | `WorkflowPlannerService`, `WorkflowPlannerPromptBuilder` |
 | **Executor** | Runs the DAG wave-by-wave, dependency-ordered, invoking each tool over HTTP at its `endpointUrl`; adaptive retries and async (poll / human-in-the-loop) steps. | `WorkflowExecutor`, `WorkflowStepRunner`, `HttpToolInvoker` |
 | **Validator** | Validates the DAG before execution: registry-only tools, unique ids, acyclic deps, `llm_answer` last, step limit. | `WorkflowDagValidator`, `WorkflowValidationService` |
@@ -538,7 +538,7 @@ POST /agent/runs/{runId}/feedback
 | POST | `/agent/evaluations/{evaluationId}/review` | `{ decision: accept\|reject, reviewerId?, comment? }` |
 | GET | `/agent/tools` | Tool registry (schemas, SYNC/ASYNC) |
 | POST | `/agent/tools` | Register tool metadata (executor must exist) |
-| POST | `/agent/feedback` | Thumbs `up` / `down` |
+| POST | `/agent/feedback` | Thumbs `up` / `down`; `up` on a completed run caches question + workflow for planner reuse |
 | POST | `/agent/chat` | Legacy: block until complete |
 | GET | `/health` | SQL connectivity |
 

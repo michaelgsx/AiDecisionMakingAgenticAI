@@ -2,6 +2,7 @@ package com.aidecision.agentic.orchestrator;
 
 import com.aidecision.agentic.config.AzureOpenAiProperties;
 import com.aidecision.agentic.config.OrchestratorProperties;
+import com.aidecision.agentic.entity.OrchestratorRun;
 import com.aidecision.agentic.entity.OrchestratorTool;
 import com.aidecision.agentic.entity.PlannerWorkflowCache;
 import com.aidecision.agentic.service.PlannerWorkflowCacheService;
@@ -111,16 +112,48 @@ public class WorkflowPlannerService {
 
     private PlannerWorkflowResponse callPlannerLlm(String question, Map<String, OrchestratorTool> tools)
             throws Exception {
+        PlannerPrompt prompt = promptBuilder.build(question, tools);
         Optional<PlannerWorkflowCache> cached = workflowCache.findByQuestion(question);
-        if (cached.isPresent()) {
+        if (cached.isPresent() && workflowCache.matchesPlannerPrompt(cached.get(), prompt)) {
             log.info("Using cached planner workflow question={}", LogSanitizer.question(question));
             return parseResponse(cached.get().getWorkflowJson());
         }
+        if (cached.isPresent()) {
+            log.info("Planner workflow cache stale (prompt or tools changed), replanning question={}",
+                    LogSanitizer.question(question));
+        }
 
-        PlannerPrompt prompt = promptBuilder.build(question, tools);
         String raw = invokeChat(prompt.systemPrompt(), prompt.userPrompt());
-        workflowCache.save(question, prompt, raw);
         return parseResponse(raw);
+    }
+
+    /**
+     * Saves question + workflow to planner cache after thumbs-up. Skips when run is incomplete
+     * or has no persisted workflow.
+     */
+    public void cacheWorkflowFromThumbsUp(OrchestratorRun run) {
+        if (run == null) {
+            return;
+        }
+        String question = run.getQuestion();
+        String workflowJson = run.getWorkflowJson();
+        if (question == null || question.isBlank() || workflowJson == null || workflowJson.isBlank()) {
+            log.debug("Skip planner cache for run {} — missing question or workflow", run.getRunId());
+            return;
+        }
+        if (!RunStatus.COMPLETED.name().equals(run.getStatus())) {
+            log.debug("Skip planner cache for run {} — status={}", run.getRunId(), run.getStatus());
+            return;
+        }
+        try {
+            PlannerPrompt prompt = promptBuilder.build(question, toolRegistry.enabledToolsByName());
+            workflowCache.save(question, prompt, workflowJson.trim());
+            log.info("Planner workflow cached after thumbs-up run={} question={}",
+                    run.getRunId(), LogSanitizer.question(question));
+        } catch (Exception e) {
+            log.warn("Failed to cache planner workflow after thumbs-up run={}: {}",
+                    run.getRunId(), LogSanitizer.message(e.getMessage()));
+        }
     }
 
     String invokeChat(String systemPrompt, String userPrompt) throws Exception {

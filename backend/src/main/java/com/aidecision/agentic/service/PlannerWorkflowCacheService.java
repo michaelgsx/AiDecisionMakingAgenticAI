@@ -4,6 +4,7 @@ import com.aidecision.agentic.entity.PlannerWorkflowCache;
 import com.aidecision.agentic.orchestrator.PlannerPrompt;
 import com.aidecision.agentic.repository.PlannerWorkflowCacheRepository;
 import com.aidecision.agentic.util.LogSanitizer;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
@@ -33,12 +34,29 @@ public class PlannerWorkflowCacheService {
 
     public Optional<PlannerWorkflowCache> findByQuestion(String question) {
         String hash = questionHash(question);
-        Optional<PlannerWorkflowCache> hit = cacheRepo.findByQuestionHash(hash);
-        if (hit.isPresent()) {
-            log.info("Planner workflow cache hit question={} hash={}",
-                    LogSanitizer.question(question), hash.substring(0, 8) + "...");
+        return cacheRepo.findByQuestionHash(hash);
+    }
+
+    /** False when planner prompt text changed (e.g. new compound-question rules) — caller should replan. */
+    public boolean matchesPlannerPrompt(PlannerWorkflowCache cached, PlannerPrompt current) {
+        if (cached == null || current == null) {
+            return false;
         }
-        return hit;
+        String storedJson = cached.getPlannerPrompt();
+        if (storedJson == null || storedJson.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode stored = mapper.readTree(storedJson);
+            return stored.path("systemPrompt").asText("").equals(current.systemPrompt())
+                    && stored.path("userPrompt").asText("").equals(current.userPrompt())
+                    && stored.path("outputJsonSchema").asText("").equals(current.outputJsonSchema());
+        } catch (Exception e) {
+            log.warn("Could not parse stored planner prompt hash={}: {}",
+                    cached.getQuestionHash() == null ? "?" : cached.getQuestionHash().substring(0, 8),
+                    LogSanitizer.message(e.getMessage()));
+            return false;
+        }
     }
 
     @Transactional

@@ -21,33 +21,25 @@ public class LlmSqlGenerationService {
     private static final Pattern SQL_FENCE =
             Pattern.compile("```(?:sql)?\\s*([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
 
-    private static final String ANALYTICS_SYSTEM = SqlServerPromptDialect.TARGET
+    private static final String ANALYTICS_SYSTEM_PREFIX = SqlServerPromptDialect.TARGET
             + "\n"
             + """
             You write T-SQL SELECT-only queries for risk analytics on Azure SQL.
             Use ONLY tables and columns from the schema catalog below.
             """
-            + SqlServerPromptDialect.READ_ONLY_SELECT_RULES
-            + """
-            - use TOP 100 or less.
-            """
-            + SqlServerPromptDialect.UNSUPPORTED_WINDOW_RULES;
+            + SqlServerPromptDialect.READ_ONLY_SELECT_RULES;
 
-    private static final String DATA_ACQUISITION_SYSTEM = SqlServerPromptDialect.TARGET
+    private static final String DATA_ACQUISITION_SYSTEM_PREFIX = SqlServerPromptDialect.TARGET
             + "\n"
             + """
             You write T-SQL SELECT-only queries to fetch risk context rows for the user's question.
             Use ONLY tables and columns from the schema catalog below.
             Prefer risk_features, risk_ingest_records, and risk_decisions when the question \
             involves a case, user, withdrawal, device, or review outcome.
-            Return context rows (TOP N), not chart-style aggregates unless the question \
+            Return context rows, not chart-style aggregates unless the question \
             explicitly asks for a count or sum.
             """
-            + SqlServerPromptDialect.READ_ONLY_SELECT_RULES
-            + """
-            - use TOP 50 or less.
-            """
-            + SqlServerPromptDialect.UNSUPPORTED_WINDOW_RULES;
+            + SqlServerPromptDialect.READ_ONLY_SELECT_RULES;
 
     public enum Mode {
         ANALYTICS,
@@ -82,34 +74,49 @@ public class LlmSqlGenerationService {
 
     public String generateSql(String question, Mode mode, List<String> tableNames, String userId)
             throws Exception {
+        return generateSql(question, mode, tableNames, userId, 200);
+    }
+
+    public String generateSql(String question, Mode mode, List<String> tableNames, String userId, int maxRows)
+            throws Exception {
         List<String> effectiveTables = resolveTablesForUser(tableNames, userId);
         if (!openAi.chatConfigured()) {
             return fallbackSql(mode, effectiveTables);
         }
 
+        int rowCap = Math.min(Math.max(maxRows, 1), 200);
         String catalogText = catalog.buildLlmCatalogText(effectiveTables);
-        String system = mode == Mode.DATA_ACQUISITION ? DATA_ACQUISITION_SYSTEM : ANALYTICS_SYSTEM;
+        String system = buildSystemPrompt(mode, rowCap);
         String user = "Schema catalog (related tables and columns):\n"
                 + catalogText
+                + "\n\nRow cap (application enforces this — omit TOP in SQL unless user asks for top/first N): "
+                + rowCap
                 + "\n\nUser question:\n"
                 + question;
 
         return generateValidatedSql(system, user);
     }
 
+    private static String buildSystemPrompt(Mode mode, int rowCap) {
+        String topRules = SqlServerPromptDialect.topAndDistinctRules(rowCap);
+        if (mode == Mode.DATA_ACQUISITION) {
+            return DATA_ACQUISITION_SYSTEM_PREFIX + topRules + SqlServerPromptDialect.UNSUPPORTED_WINDOW_RULES;
+        }
+        return ANALYTICS_SYSTEM_PREFIX + topRules + SqlServerPromptDialect.UNSUPPORTED_WINDOW_RULES;
+    }
+
     private String generateValidatedSql(String system, String user) throws Exception {
         String sql = extractSql(chatComplete(system, user, 1024, 0.1));
         try {
-            sqlValidator.validate(sql);
-            return sql;
+            return sqlValidator.validateAndNormalize(sql);
         } catch (IllegalArgumentException first) {
             String retryUser = user
                     + "\n\nPrevious SQL was rejected — must be valid Microsoft SQL Server T-SQL: "
                     + first.getMessage()
-                    + "\nRegenerate using T-SQL only (TOP not LIMIT; never COUNT(DISTINCT ...) OVER ()).";
+                    + "\nRegenerate: use SELECT DISTINCT TOP n (never TOP n DISTINCT); "
+                    + "omit TOP for list-all questions; never COUNT(DISTINCT ...) OVER ().";
             sql = extractSql(chatComplete(system, retryUser, 1024, 0.0));
-            sqlValidator.validate(sql);
-            return sql;
+            return sqlValidator.validateAndNormalize(sql);
         }
     }
 

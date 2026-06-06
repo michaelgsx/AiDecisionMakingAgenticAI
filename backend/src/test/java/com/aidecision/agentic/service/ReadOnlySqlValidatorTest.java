@@ -2,6 +2,7 @@ package com.aidecision.agentic.service;
 
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -31,6 +32,13 @@ class ReadOnlySqlValidatorTest {
     void forbiddenKeyword_fails() {
         assertThatThrownBy(() -> validator.validate("SELECT * INTO #tmp FROM dbo.risk_features DROP TABLE #tmp"))
                 .hasMessageContaining("forbidden");
+    }
+
+    @Test
+    void validateAndNormalize_fixesTopBeforeDistinct() {
+        String sql = validator.validateAndNormalize(
+                "SELECT TOP 100 DISTINCT rf.user_id FROM dbo.risk_features rf WHERE rf.user_id IS NOT NULL");
+        assertThat(sql).startsWith("SELECT DISTINCT TOP 100");
     }
 
     @Test

@@ -82,7 +82,8 @@ public class DataAcquisitionPlannerService {
 
     public String generateSql(String question, List<String> selectedTables, int maxRows) throws Exception {
         int top = Math.min(Math.max(maxRows, 1), 100);
-        String system = SQL_SYSTEM_TEMPLATE.formatted(top);
+        String system = SQL_SYSTEM_TEMPLATE.formatted(top)
+                + SqlServerPromptDialect.topAndDistinctRules(top);
 
         if (!llm.isChatConfigured()) {
             return llm.fallbackAcquisitionSql(selectedTables);

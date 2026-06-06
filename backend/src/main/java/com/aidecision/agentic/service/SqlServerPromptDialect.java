@@ -17,6 +17,18 @@ final class SqlServerPromptDialect {
             Rules: single statement; no semicolons; read-only.
             """;
 
+    static String topAndDistinctRules(int maxRowsCap) {
+        return """
+            T-SQL TOP / DISTINCT (required):
+            - Order is SELECT DISTINCT TOP n ... — NEVER SELECT TOP n DISTINCT (SQL Server error 156).
+            - Pure aggregates (COUNT/SUM/AVG with no row listing): do NOT use TOP.
+            - List / show all / enumerate / "list them": SELECT DISTINCT col ... ORDER BY col \
+            WITHOUT TOP in SQL; the app caps rows at %d automatically.
+            - Put TOP in SQL only when the user explicitly asks for "top N", "first N", or a sample.
+            """
+                .formatted(maxRowsCap);
+    }
+
     static final String UNSUPPORTED_WINDOW_RULES = """
             T-SQL window-function limits:
             - NEVER write COUNT(DISTINCT ...) OVER () — SQL Server rejects it (error 10759).

@@ -67,6 +67,25 @@ class PlannerWorkflowCacheServiceTest {
     }
 
     @Test
+    void matchesPlannerPrompt_falseWhenSystemPromptChanged() throws Exception {
+        PlannerPrompt current = new PlannerPrompt("system v2", "user", "{}");
+        PlannerWorkflowCache row = new PlannerWorkflowCache();
+        row.setPlannerPrompt(new ObjectMapper().writeValueAsString(
+                new PlannerPrompt("system v1", "user", "{}")));
+
+        assertThat(cacheService.matchesPlannerPrompt(row, current)).isFalse();
+    }
+
+    @Test
+    void matchesPlannerPrompt_trueWhenPromptIdentical() throws Exception {
+        PlannerPrompt prompt = new PlannerPrompt("system", "user", "{}");
+        PlannerWorkflowCache row = new PlannerWorkflowCache();
+        row.setPlannerPrompt(new ObjectMapper().writeValueAsString(prompt));
+
+        assertThat(cacheService.matchesPlannerPrompt(row, prompt)).isTrue();
+    }
+
+    @Test
     void save_persistsPromptAndWorkflowJson() throws Exception {
         when(cacheRepo.findByQuestionHash(any())).thenReturn(Optional.empty());
         when(cacheRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
