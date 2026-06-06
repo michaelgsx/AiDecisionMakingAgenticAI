@@ -21,30 +21,33 @@ public class LlmSqlGenerationService {
     private static final Pattern SQL_FENCE =
             Pattern.compile("```(?:sql)?\\s*([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
 
-    private static final String ANALYTICS_SYSTEM = """
-            You write Microsoft SQL Server T-SQL SELECT-only queries for risk analytics.
+    private static final String ANALYTICS_SYSTEM = SqlServerPromptDialect.TARGET
+            + "\n"
+            + """
+            You write T-SQL SELECT-only queries for risk analytics on Azure SQL.
             Use ONLY tables and columns from the schema catalog below.
-            Output ONLY the SQL (no markdown fences, no explanation).
-            Rules:
-            - single SELECT; no semicolons; use TOP 100 or less; read-only.
-            - NEVER use COUNT(DISTINCT ...) OVER () — SQL Server rejects it.
-            - For "how many X and list them": use a CTE, e.g.
-              WITH items AS (SELECT DISTINCT col FROM t WHERE col IS NOT NULL)
-              SELECT TOP 100 col, (SELECT COUNT(*) FROM items) AS total_count FROM items ORDER BY col.
-            - Use GROUP BY for aggregates; use CTEs/subqueries instead of unsupported window DISTINCT.
-            """;
+            """
+            + SqlServerPromptDialect.READ_ONLY_SELECT_RULES
+            + """
+            - use TOP 100 or less.
+            """
+            + SqlServerPromptDialect.UNSUPPORTED_WINDOW_RULES;
 
-    private static final String DATA_ACQUISITION_SYSTEM = """
-            You write Microsoft SQL Server SELECT-only queries to fetch risk context rows \
-            needed to answer the user's question.
+    private static final String DATA_ACQUISITION_SYSTEM = SqlServerPromptDialect.TARGET
+            + "\n"
+            + """
+            You write T-SQL SELECT-only queries to fetch risk context rows for the user's question.
             Use ONLY tables and columns from the schema catalog below.
             Prefer risk_features, risk_ingest_records, and risk_decisions when the question \
             involves a case, user, withdrawal, device, or review outcome.
-            Return the rows that provide context (TOP N), not chart-style aggregates unless \
-            the question explicitly asks for a count or sum.
-            Output ONLY the SQL (no markdown fences, no explanation).
-            Rules: single SELECT; no semicolons; use TOP 50 or less; read-only.
-            """;
+            Return context rows (TOP N), not chart-style aggregates unless the question \
+            explicitly asks for a count or sum.
+            """
+            + SqlServerPromptDialect.READ_ONLY_SELECT_RULES
+            + """
+            - use TOP 50 or less.
+            """
+            + SqlServerPromptDialect.UNSUPPORTED_WINDOW_RULES;
 
     public enum Mode {
         ANALYTICS,
@@ -101,9 +104,9 @@ public class LlmSqlGenerationService {
             return sql;
         } catch (IllegalArgumentException first) {
             String retryUser = user
-                    + "\n\nPrevious SQL was rejected for SQL Server: "
+                    + "\n\nPrevious SQL was rejected — must be valid Microsoft SQL Server T-SQL: "
                     + first.getMessage()
-                    + "\nRegenerate valid T-SQL only (never COUNT(DISTINCT ...) OVER ()).";
+                    + "\nRegenerate using T-SQL only (TOP not LIMIT; never COUNT(DISTINCT ...) OVER ()).";
             sql = extractSql(chatComplete(system, retryUser, 1024, 0.0));
             sqlValidator.validate(sql);
             return sql;

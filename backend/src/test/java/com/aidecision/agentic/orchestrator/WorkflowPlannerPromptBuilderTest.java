@@ -41,6 +41,23 @@ class WorkflowPlannerPromptBuilderTest {
         assertThat(prompt.outputJsonSchema()).contains("steps");
     }
 
+    @Test
+    void systemPrompt_instructsParallelNl2SqlForCompoundQuestions() throws Exception {
+        OrchestratorTool nl2sql = sampleTool("natural_language_to_sql");
+        nl2sql.setDescription("NL to read-only SQL.");
+
+        PlannerPrompt prompt = builder.build(
+                "how many distinct user ids do we have in total? and list them please.",
+                Map.of("natural_language_to_sql", nl2sql, "llm_answer", sampleTool("llm_answer")));
+
+        assertThat(prompt.systemPrompt()).contains("Compound / multi-part questions");
+        assertThat(prompt.systemPrompt()).contains("dependsOn: []");
+        assertThat(prompt.systemPrompt()).contains("run in parallel");
+        assertThat(prompt.systemPrompt()).contains("How many distinct user ids are there?");
+        assertThat(prompt.systemPrompt()).contains("List all distinct user ids");
+        assertThat(prompt.outputJsonSchema()).contains("run in parallel");
+    }
+
     private static OrchestratorTool sampleTool(String name) {
         OrchestratorTool t = new OrchestratorTool();
         t.setToolName(name);

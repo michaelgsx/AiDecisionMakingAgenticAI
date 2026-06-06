@@ -77,6 +77,26 @@ public class WorkflowPlannerPromptBuilder {
                 - Similar historical cases / policy: ai_decision_rag or similarity_retrieval.
                 - Aggregates / counts / analytics SQL: natural_language_to_sql before llm_answer.
                 - Human approval before final answer: human_in_the_loop (ASYNC) before llm_answer.
+
+                Compound / multi-part questions (CRITICAL for natural_language_to_sql):
+                - When the user asks for MORE THAN ONE distinct SQL analytics outcome in one message \
+                (e.g. "how many X … and list them", "count … and show …", "total … plus breakdown by …"), \
+                do NOT pass the full compound sentence to a single natural_language_to_sql step.
+                - natural_language_to_sql allows only ONE read-only SELECT per step (no semicolons, no \
+                multi-statement batches). Split into separate natural_language_to_sql steps — one focused \
+                sub-question per step in params.question.
+                - Independent analytics sub-questions MUST run in parallel: give each step dependsOn: [] \
+                (empty). The executor runs all READY steps with no unsatisfied dependencies in the same \
+                wave concurrently.
+                - llm_answer MUST depend on every upstream data step (dependsOn lists all NL2SQL step ids) \
+                and synthesize the full answer from their outputs.
+                - Example — "how many distinct user ids do we have, and list them":
+                  s1 natural_language_to_sql params.question="How many distinct user ids are there?" dependsOn=[]
+                  s2 natural_language_to_sql params.question="List all distinct user ids." dependsOn=[] \
+                  (use maxRows 100+ if listing)
+                  s3 llm_answer dependsOn=["s1","s2"]
+                - Apply the same split for other compound patterns (count + list, aggregate + detail rows, \
+                two separate metrics joined by "and" / "also" / "plus").
                 """
                 .formatted(defaultMax, defaultTimeout, maxSteps);
     }
@@ -147,7 +167,8 @@ public class WorkflowPlannerPromptBuilder {
                 .put("description", "toolName from tools[]");
         stepProps.putObject("dependsOn")
                 .put("type", "array")
-                .put("description", "Step ids that must complete first")
+                .put("description", "Step ids that must complete first; use [] for none. Steps whose "
+                        + "dependencies are all satisfied run in parallel in the same wave.")
                 .putArray("items")
                 .addObject()
                 .put("type", "string");

@@ -125,7 +125,7 @@ final class ToolJsonSchemas {
               "properties": {
                 "question": {
                   "type": "string",
-                  "description": "Analytics question in plain English (counts, filters, aggregates)."
+                  "description": "Analytics question in plain English (counts, filters, aggregates). SQL is generated as Microsoft SQL Server T-SQL (TOP, dbo schema, no LIMIT)."
                 },
                 "maxRows": {
                   "type": "integer",

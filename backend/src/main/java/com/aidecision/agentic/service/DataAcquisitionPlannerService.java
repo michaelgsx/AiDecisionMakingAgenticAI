@@ -32,16 +32,19 @@ public class DataAcquisitionPlannerService {
             confidence is your certainty that these tables suffice to answer the question.
             """;
 
-    private static final String SQL_SYSTEM_TEMPLATE = """
-            You write Microsoft SQL Server SELECT-only queries to fetch context rows \
-            for the user's question.
+    private static final String SQL_SYSTEM_TEMPLATE = SqlServerPromptDialect.TARGET
+            + "\n"
+            + """
+            You write T-SQL SELECT-only queries to fetch context rows for the user's question.
             Use ONLY tables, columns, and FOREIGN KEYS from the schema detail below.
             Join tables using the documented foreign keys when multiple tables are needed.
             Return context rows (TOP N), not chart aggregates unless the question asks for counts.
-            Output ONLY the SQL (no markdown fences, no explanation).
-            Rules: single SELECT; no semicolons; use TOP %d or less; read-only.
-            NEVER use COUNT(DISTINCT ...) OVER () — use a CTE or scalar subquery instead.
-            """;
+            """
+            + SqlServerPromptDialect.READ_ONLY_SELECT_RULES
+            + """
+            - use TOP %d or less.
+            """
+            + SqlServerPromptDialect.UNSUPPORTED_WINDOW_RULES;
 
     private final LlmSqlGenerationService llm;
     private final SchemaCatalogService catalog;

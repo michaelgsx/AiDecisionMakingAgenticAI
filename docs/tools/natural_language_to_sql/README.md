@@ -18,11 +18,13 @@ User table ACL (`user_table_access`) limits which catalog tables may appear in g
 
 ## Prompt example (SQL only)
 
-System instruction (excerpt; see `LlmSqlGenerationService`):
+System instruction (excerpt; see `LlmSqlGenerationService` — **Microsoft SQL Server T-SQL only**):
 
 ```text
-You write Microsoft SQL Server SELECT-only queries for risk analytics.
-Use ONLY tables and columns from the schema catalog below.
+TARGET DIALECT: Microsoft SQL Server (T-SQL) on Azure SQL.
+Write T-SQL only — NOT PostgreSQL/MySQL. Use TOP (never LIMIT), dbo.table_name.
+NEVER use COUNT(DISTINCT ...) OVER () — SQL Server rejects it; use CTE + scalar subquery instead.
+You write T-SQL SELECT-only queries for risk analytics.
 Output ONLY the SQL (no markdown fences, no explanation).
 Rules: single SELECT; no semicolons; use TOP 100 or less; read-only.
 ```
