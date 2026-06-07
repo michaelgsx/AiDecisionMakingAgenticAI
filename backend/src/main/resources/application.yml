@@ -56,3 +56,7 @@ app:
     chat-api-version: ${AZURE_OPENAI_CHAT_API_VERSION:}
     api-version: ${AZURE_OPENAI_API_VERSION:2024-02-01}
     skip-chat: ${AZURE_OPENAI_SKIP_CHAT:false}
+  qa:
+    sample-questions:
+      - "show me the information of user 'user-001'"
+      - "how many distinct user ids do we have in total? and list them please."
