@@ -378,7 +378,9 @@ Branch tool steps should list the gate in `dependsOn`, e.g. `"dependsOn": ["g1"]
 
 Use field names from each tool's **responseSchema** in `orchestrator_tool`. Gate output is JSON: `{ "branch": "then"|"else", "result": true|false, "expression": "…", "takenSteps": [], "skippedSteps": [] }`.
 
-### Example workflow with a gate
+### Copy-paste runnable example (gate + NL2SQL)
+
+Valid against built-in tools (`natural_language_to_sql`, `llm_answer`). Save as `workflow-gate-example.json` or paste into `workflow.html`.
 
 ```json
 {
@@ -387,7 +389,12 @@ Use field names from each tool's **responseSchema** in `orchestrator_tool`. Gate
       "id": "s1",
       "tool": "natural_language_to_sql",
       "dependsOn": [],
-      "params": { "question": "How many users?", "maxRows": 100 }
+      "params": {
+        "question": "How many distinct user ids are in risk_features?",
+        "maxRows": 100
+      },
+      "maxTimeMs": 30000,
+      "timeoutMs": 120000
     },
     {
       "id": "g1",
@@ -401,23 +408,52 @@ Use field names from each tool's **responseSchema** in `orchestrator_tool`. Gate
       "id": "s2",
       "tool": "llm_answer",
       "dependsOn": ["g1", "s1"],
-      "params": {}
+      "params": {},
+      "maxTimeMs": 30000,
+      "timeoutMs": 120000
     },
     {
       "id": "s3",
       "tool": "llm_answer",
       "dependsOn": ["g1"],
-      "params": {}
+      "params": {},
+      "maxTimeMs": 30000,
+      "timeoutMs": 120000
     }
   ]
 }
 ```
 
-If `s1` returns rows → `s2` runs, `s3` is `SKIPPED`. If empty → `s3` runs, `s2` is `SKIPPED`.
+**What happens at runtime**
+
+| `s1` result | Runs | Skipped |
+|-------------|------|---------|
+| `rowCount > 0` | `g1` → `s2` | `s3` |
+| `rowCount == 0` | `g1` → `s3` | `s2` |
+
+**Validate and render (local API on port 8788)**
+
+```bash
+# 1) Check DAG (acyclic, known tools, execution waves)
+curl -sS -X POST http://localhost:8788/agent/workflow/validate \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -nc --rawfile w workflow-gate-example.json '{workflowJson: $w}')"
+
+# 2) Mermaid diagram
+curl -sS -X POST http://localhost:8788/agent/workflow/diagram \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -nc --rawfile w workflow-gate-example.json '{workflowJson: $w}')"
+```
+
+If `OPS_TOKEN` is set, add `-H "Authorization: Bearer $OPS_TOKEN"`.
+
+The planner may emit a similar DAG for compound analytics questions; you can also inspect a live run via `GET /agent/runs/{runId}` → `workflowJson` / `workflowMermaid` after `POST /agent/ask`.
 
 Implementation: `GateConditionEvaluator`, `WorkflowGateRunner`, `WorkflowExecutor`.
 
 Gate nodes render in Mermaid as `gate` with the expression snippet; `SKIPPED` steps use the grey style class.
+
+### Workflow diagram API
 
 | Method | Path | Description |
 |--------|------|-------------|
