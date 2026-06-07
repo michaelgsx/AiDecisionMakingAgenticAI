@@ -7,6 +7,7 @@ import com.aidecision.agentic.entity.QaFeedback;
 import com.aidecision.agentic.orchestrator.RunStatus;
 import com.aidecision.agentic.orchestrator.WorkflowPlannerService;
 import com.aidecision.agentic.repository.OrchestratorRunRepository;
+import com.aidecision.agentic.repository.QaConversationRepository;
 import com.aidecision.agentic.repository.QaFeedbackRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,13 +33,15 @@ class QaFeedbackServiceTest {
     @Mock
     private OrchestratorRunRepository runRepo;
     @Mock
+    private QaConversationRepository conversationRepo;
+    @Mock
     private WorkflowPlannerService planner;
 
     private QaFeedbackService service;
 
     @BeforeEach
     void setUp() {
-        service = new QaFeedbackService(feedbackRepo, runRepo, planner);
+        service = new QaFeedbackService(feedbackRepo, runRepo, conversationRepo, planner);
     }
 
     @Test
@@ -69,6 +72,24 @@ class QaFeedbackServiceTest {
 
         verify(planner, never()).cacheWorkflowFromThumbsUp(any());
         assertThat(response.message()).isEqualTo("Feedback recorded.");
+    }
+
+    @Test
+    void submit_ignoresRunIdSentAsConversationId() {
+        UUID runId = UUID.randomUUID();
+        OrchestratorRun run = completedRun(runId, "{\"steps\":[]}");
+        when(runRepo.findById(runId)).thenReturn(Optional.of(run));
+        when(feedbackRepo.findByMessageId(runId)).thenReturn(Optional.empty());
+        when(feedbackRepo.save(any())).thenAnswer(inv -> {
+            QaFeedback row = inv.getArgument(0);
+            assertThat(row.getConversationId()).isNull();
+            return assignFeedbackId(row);
+        });
+
+        service.submit(new FeedbackRequest(
+                runId.toString(), runId.toString(), runId.toString(), "down", null));
+
+        verify(conversationRepo, never()).existsById(any());
     }
 
     private static QaFeedback assignFeedbackId(QaFeedback row) {
