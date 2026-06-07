@@ -103,12 +103,12 @@ public class WorkflowPlannerService {
 
     private WorkflowDag defaultDag(String question) {
         return new WorkflowDag(List.of(
-                new WorkflowDag.WorkflowStepDef("s1", "data_acquisition", List.of(),
+                WorkflowDag.WorkflowStepDef.tool("s1", "data_acquisition", List.of(),
                         Map.of("scenario", "qa", "question", question),
                         (int) orchProps.getDefaultStepMaxTimeMs(), (int) orchProps.getDefaultStepTimeoutMs()),
-                new WorkflowDag.WorkflowStepDef("s2", "ai_decision_rag", List.of("s1"), Map.of("text", question),
+                WorkflowDag.WorkflowStepDef.tool("s2", "ai_decision_rag", List.of("s1"), Map.of("text", question),
                         (int) orchProps.getDefaultStepMaxTimeMs(), (int) orchProps.getDefaultStepTimeoutMs()),
-                new WorkflowDag.WorkflowStepDef("s3", "llm_answer", List.of("s1", "s2"), Map.of(),
+                WorkflowDag.WorkflowStepDef.tool("s3", "llm_answer", List.of("s1", "s2"), Map.of(),
                         (int) orchProps.getDefaultStepMaxTimeMs(), (int) orchProps.getDefaultStepTimeoutMs())
         ));
     }
@@ -230,11 +230,15 @@ public class WorkflowPlannerService {
                     mapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
             steps.add(new WorkflowDag.WorkflowStepDef(
                     n.path("id").asText(),
-                    n.path("tool").asText(),
+                    n.hasNonNull("type") ? n.path("type").asText() : null,
+                    n.hasNonNull("tool") ? n.path("tool").asText() : null,
                     deps,
                     params == null ? Map.of() : params,
                     n.has("maxTimeMs") ? n.path("maxTimeMs").asInt() : null,
-                    n.has("timeoutMs") ? n.path("timeoutMs").asInt() : null
+                    n.has("timeoutMs") ? n.path("timeoutMs").asInt() : null,
+                    n.hasNonNull("expression") ? n.path("expression").asText() : null,
+                    readStringList(n.path("then")),
+                    readStringList(n.path("else"))
             ));
         }
 
@@ -242,5 +246,16 @@ public class WorkflowPlannerService {
             message = "Planned " + steps.size() + " step(s).";
         }
         return new PlannerWorkflowResponse(status, message, List.of(), steps);
+    }
+
+    private static List<String> readStringList(com.fasterxml.jackson.databind.JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (com.fasterxml.jackson.databind.JsonNode item : node) {
+            out.add(item.asText());
+        }
+        return out;
     }
 }

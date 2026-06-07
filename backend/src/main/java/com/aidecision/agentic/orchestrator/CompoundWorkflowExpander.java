@@ -109,12 +109,12 @@ public class CompoundWorkflowExpander {
             if (maxRows instanceof Number n) {
                 params.put("maxRows", n.intValue());
             }
-            steps.add(new WorkflowDag.WorkflowStepDef(
+            steps.add(WorkflowDag.WorkflowStepDef.tool(
                     id, NL2SQL, List.of(), params, maxTime, timeout));
         }
 
         String answerId = "s" + (subQuestions.size() + 1);
-        steps.add(new WorkflowDag.WorkflowStepDef(
+        steps.add(WorkflowDag.WorkflowStepDef.tool(
                 answerId, LLM_ANSWER, List.copyOf(dataStepIds), Map.of(), maxTime, timeout));
 
         return new WorkflowDag(steps);

@@ -57,7 +57,18 @@ public final class WorkflowMermaidRenderer {
 
     private static String buildLabel(WorkflowDag.WorkflowStepDef step, String status) {
         StringBuilder label = new StringBuilder();
-        label.append(step.id()).append("<br/>").append(step.tool());
+        label.append(step.id()).append("<br/>");
+        if (step.isGate()) {
+            label.append("gate");
+            if (step.expression() != null && !step.expression().isBlank()) {
+                String expr = step.expression().length() > 40
+                        ? step.expression().substring(0, 37) + "..."
+                        : step.expression();
+                label.append("<br/>").append(expr);
+            }
+        } else {
+            label.append(step.tool());
+        }
         if (status != null && !status.isBlank()) {
             label.append("<br/>").append(status.trim().toUpperCase());
         }

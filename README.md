@@ -323,6 +323,102 @@ Each step becomes a row in `orchestrator_step` (`step_key` = `id`, `tool_name` =
 
 The API can turn the same JSON into a **Mermaid flowchart** (nodes = steps, edges = `dependsOn`). Step execution status from a run is applied as node colors when available.
 
+## Workflow executor and condition gates
+
+The **executor** (`WorkflowExecutor` + `WorkflowStepRunner`) runs the planned DAG:
+
+1. **Tool steps** (`type: "tool"` or omitted) — invoke a registry tool by name via HTTP (`HttpToolInvoker`) or in-process `AgentTool`. Inputs come from `params` (must match the tool `requestSchema`). Output is JSON stored on `orchestrator_step.output_json` (shape described by `responseSchema`).
+2. **Gate steps** (`type: "gate"`) — runtime **if/else**; no HTTP call. After dependencies complete, the executor evaluates `expression` against prior step outputs, marks the gate `COMPLETED`, and sets the untaken branch to `SKIPPED` (including downstream steps that depend on skipped nodes).
+
+### Tool registry (dynamic metadata)
+
+Each row in `orchestrator_tool` carries:
+
+| Field | Purpose |
+|-------|---------|
+| `tool_name`, `version` | Step `tool` must match an enabled row |
+| `endpoint_url` | `POST …/execute` (and `/poll` for ASYNC) |
+| `request_schema_json` / `response_schema_json` | Planner + documentation; executor stores raw JSON I/O |
+| `max_retry` | Per-step retry budget (`orchestrator_step.attempt_count`) |
+| `execution_mode` | `SYNC` or `ASYNC` |
+
+Register via `POST /agent/tools` or startup sync from `BuiltinToolCatalog`. Built-ins also have Spring `AgentTool` beans; production can set `app.orchestrator.invoke-tools-over-http=true` so every tool is URL-addressable.
+
+### Gate step shape
+
+```json
+{
+  "id": "g1",
+  "type": "gate",
+  "dependsOn": ["s1"],
+  "expression": "steps.s1.output.rowCount > 5",
+  "then": ["s2"],
+  "else": ["s3"]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `type` | Must be `"gate"` |
+| `dependsOn` | Steps whose `output_json` the expression reads (usually the step immediately upstream) |
+| `expression` | Condition on prior outputs (see below) |
+| `then` | Step ids to **keep** when expression is **true** |
+| `else` | Step ids to **keep** when expression is **false** |
+
+Branch tool steps should list the gate in `dependsOn`, e.g. `"dependsOn": ["g1"]`. Untaken roots and their descendants are marked `SKIPPED`. A run completes when every step is `COMPLETED` or `SKIPPED`.
+
+### Expression syntax (v1)
+
+| Form | Example |
+|------|---------|
+| Numeric compare | `steps.s1.output.rowCount > 5` |
+| Equality (string) | `steps.s2.output.aiLabel == 'frozen'` |
+| Equality (boolean) | `steps.s3.output.accepted == true` |
+| Truthy field | `steps.s3.output.accepted` |
+
+Use field names from each tool's **responseSchema** in `orchestrator_tool`. Gate output is JSON: `{ "branch": "then"|"else", "result": true|false, "expression": "…", "takenSteps": [], "skippedSteps": [] }`.
+
+### Example workflow with a gate
+
+```json
+{
+  "steps": [
+    {
+      "id": "s1",
+      "tool": "natural_language_to_sql",
+      "dependsOn": [],
+      "params": { "question": "How many users?", "maxRows": 100 }
+    },
+    {
+      "id": "g1",
+      "type": "gate",
+      "dependsOn": ["s1"],
+      "expression": "steps.s1.output.rowCount > 0",
+      "then": ["s2"],
+      "else": ["s3"]
+    },
+    {
+      "id": "s2",
+      "tool": "llm_answer",
+      "dependsOn": ["g1", "s1"],
+      "params": {}
+    },
+    {
+      "id": "s3",
+      "tool": "llm_answer",
+      "dependsOn": ["g1"],
+      "params": {}
+    }
+  ]
+}
+```
+
+If `s1` returns rows → `s2` runs, `s3` is `SKIPPED`. If empty → `s3` runs, `s2` is `SKIPPED`.
+
+Implementation: `GateConditionEvaluator`, `WorkflowGateRunner`, `WorkflowExecutor`.
+
+Gate nodes render in Mermaid as `gate` with the expression snippet; `SKIPPED` steps use the grey style class.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/agent/workflow/diagram` | Body: `{ "workflowJson": "<string>", "stepStatuses": { "s1": "COMPLETED", ... } }` (statuses optional) → `{ "format": "mermaid", "mermaid": "..." }` |

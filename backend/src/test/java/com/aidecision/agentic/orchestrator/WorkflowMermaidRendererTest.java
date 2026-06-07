@@ -19,8 +19,8 @@ class WorkflowMermaidRendererTest {
     @Test
     void linearDag_rendersNodesAndEdges() {
         WorkflowDag dag = new WorkflowDag(List.of(
-                new WorkflowDag.WorkflowStepDef("s1", "data_acquisition", List.of(), Map.of(), null, null),
-                new WorkflowDag.WorkflowStepDef("s2", "llm_answer", List.of("s1"), Map.of(), null, null)));
+                WorkflowDag.WorkflowStepDef.tool("s1", "data_acquisition", List.of(), Map.of(), null, null),
+                WorkflowDag.WorkflowStepDef.tool("s2", "llm_answer", List.of("s1"), Map.of(), null, null)));
 
         String m = WorkflowMermaidRenderer.toMermaid(dag, Map.of("s1", "COMPLETED", "s2", "RUNNING"));
 

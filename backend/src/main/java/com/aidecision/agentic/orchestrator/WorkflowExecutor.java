@@ -37,6 +37,7 @@ public class WorkflowExecutor {
     private final OrchestratorStepRepository stepRepo;
     private final ToolRegistryService toolRegistry;
     private final WorkflowStepRunner stepRunner;
+    private final WorkflowGateRunner gateRunner;
     private final OrchestratorProperties props;
     private final ObjectMapper mapper;
     private final Executor workflowStepExecutor;
@@ -45,12 +46,14 @@ public class WorkflowExecutor {
             OrchestratorStepRepository stepRepo,
             ToolRegistryService toolRegistry,
             WorkflowStepRunner stepRunner,
+            WorkflowGateRunner gateRunner,
             OrchestratorProperties props,
             ObjectMapper mapper,
             @Qualifier("workflowStepExecutor") Executor workflowStepExecutor) {
         this.stepRepo = stepRepo;
         this.toolRegistry = toolRegistry;
         this.stepRunner = stepRunner;
+        this.gateRunner = gateRunner;
         this.props = props;
         this.mapper = mapper;
         this.workflowStepExecutor = workflowStepExecutor;
@@ -138,8 +141,26 @@ public class WorkflowExecutor {
     }
 
     boolean executeReadyWaveParallel(OrchestratorRun run, List<OrchestratorStep> readySteps) {
-        List<CompletableFuture<WorkflowStepRunner.StepRunResult>> futures = new ArrayList<>();
+        List<OrchestratorStep> gateSteps = new ArrayList<>();
+        List<OrchestratorStep> toolSteps = new ArrayList<>();
         for (OrchestratorStep step : readySteps) {
+            if (gateRunner.isGateStep(step)) {
+                gateSteps.add(step);
+            } else {
+                toolSteps.add(step);
+            }
+        }
+
+        for (OrchestratorStep gate : gateSteps) {
+            WorkflowStepRunner.StepRunResult gateResult =
+                    gateRunner.runGate(run.getRunId(), gate.getStepId());
+            if (gateResult.outcome() == WorkflowStepRunner.StepOutcome.FAILED) {
+                return false;
+            }
+        }
+
+        List<CompletableFuture<WorkflowStepRunner.StepRunResult>> futures = new ArrayList<>();
+        for (OrchestratorStep step : toolSteps) {
             var toolMeta = toolRegistry.enabledToolsByName().get(step.getToolName());
             if (toolMeta != null && !"SYNC".equalsIgnoreCase(toolMeta.getExecutionMode())) {
                 failStep(step, "Sync workflow cannot execute ASYNC tool: " + step.getToolName());
@@ -160,7 +181,7 @@ public class WorkflowExecutor {
             } else if (result.outcome() == WorkflowStepRunner.StepOutcome.RETRY_READY) {
                 anyRetry = true;
             } else if (result.outcome() == WorkflowStepRunner.StepOutcome.ASYNC_RUNNING) {
-                OrchestratorStep asyncStep = readySteps.get(i);
+                OrchestratorStep asyncStep = toolSteps.get(i);
                 failStep(asyncStep, "Unexpected ASYNC tool in sync workflow: " + asyncStep.getToolName());
                 return false;
             }
@@ -172,7 +193,8 @@ public class WorkflowExecutor {
         if (anyRetry) {
             log.debug("Run {} has steps scheduled for retry", run.getRunId());
         } else {
-            log.info("Run {} completed parallel wave of {} step(s)", run.getRunId(), readySteps.size());
+            log.info("Run {} completed parallel wave of {} tool step(s) and {} gate(s)",
+                    run.getRunId(), toolSteps.size(), gateSteps.size());
         }
         return true;
     }
@@ -228,9 +250,14 @@ public class WorkflowExecutor {
     private boolean dependenciesMet(OrchestratorStep step, Map<String, OrchestratorStep> byKey) {
         for (String dep : readDeps(step)) {
             OrchestratorStep d = byKey.get(dep);
-            if (d == null || !StepStatus.COMPLETED.name().equals(d.getStatus())) {
+            if (d == null) {
                 return false;
             }
+            String status = d.getStatus();
+            if (StepStatus.COMPLETED.name().equals(status) || StepStatus.SKIPPED.name().equals(status)) {
+                continue;
+            }
+            return false;
         }
         return true;
     }
@@ -256,7 +283,10 @@ public class WorkflowExecutor {
     }
 
     private static boolean allCompleted(List<OrchestratorStep> steps) {
-        return steps.stream().allMatch(s -> StepStatus.COMPLETED.name().equals(s.getStatus()));
+        return steps.stream().allMatch(s -> {
+            String status = s.getStatus();
+            return StepStatus.COMPLETED.name().equals(status) || StepStatus.SKIPPED.name().equals(status);
+        });
     }
 
     private static boolean anyFailed(List<OrchestratorStep> steps) {

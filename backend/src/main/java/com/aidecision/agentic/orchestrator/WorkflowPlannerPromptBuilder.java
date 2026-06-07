@@ -108,6 +108,16 @@ public class WorkflowPlannerPromptBuilder {
                 data_acquisition, RAG, etc. whose outputs the final answer needs).
                 - Single-intent questions: one data step + llm_answer is enough; do not over-split.
 
+                Conditional branching (gate steps):
+                - Use type "gate" for runtime if/else (not a registry tool).
+                - Gate fields: id, type=gate, dependsOn, expression, then[], else[].
+                - expression reads prior step outputs, e.g. steps.s1.output.rowCount > 5 or \
+                steps.s2.output.aiLabel == 'frozen'. Use responseSchema field names from toolRegistry.
+                - then[] / else[] are step ids to run when expression is true / false. Untaken branch \
+                steps are marked SKIPPED by the executor.
+                - Branch steps should dependOn the gate id (and any other deps). Example:
+                  s1 data_acquisition → g1 gate → s2 (then) or s3 (else) → s4 llm_answer dependsOn taken branch.
+
                 Shape (variable N — adapt ids and count to the user message, no fixed template):
                   s1..sN — one data tool step per distinct sub-intent; parallel when independent
                   s(N+1) llm_answer — dependsOn all of s1..sN (or the sequential chain tail)
@@ -177,9 +187,13 @@ public class WorkflowPlannerPromptBuilder {
         stepItem.put("type", "object");
         ObjectNode stepProps = stepItem.putObject("properties");
         stepProps.putObject("id").put("type", "string").put("description", "Unique step id, e.g. s1");
+        stepProps.putObject("type")
+                .put("type", "string")
+                .put("description", "tool (default) or gate for conditional branch")
+                .set("enum", mapper.createArrayNode().add("tool").add("gate"));
         stepProps.putObject("tool")
                 .put("type", "string")
-                .put("description", "toolName from tools[]");
+                .put("description", "toolName from tools[]; omit for gate steps");
         stepProps.putObject("dependsOn")
                 .put("type", "array")
                 .put("description", "Step ids that must complete first; use [] for none. Steps whose "
@@ -196,8 +210,19 @@ public class WorkflowPlannerPromptBuilder {
         stepProps.putObject("timeoutMs")
                 .put("type", "integer")
                 .put("description", "Hard timeout ms (default " + defaultTimeout + ")");
+        stepProps.putObject("expression")
+                .put("type", "string")
+                .put("description", "Gate only: condition on prior outputs, e.g. steps.s1.output.rowCount > 5");
+        ObjectNode thenNode = stepProps.putObject("then");
+        thenNode.put("type", "array");
+        thenNode.put("description", "Gate only: step ids when expression is true");
+        thenNode.putArray("items").addObject().put("type", "string");
+        ObjectNode elseNode = stepProps.putObject("else");
+        elseNode.put("type", "array");
+        elseNode.put("description", "Gate only: step ids when expression is false");
+        elseNode.putArray("items").addObject().put("type", "string");
         ArrayNode stepRequired = stepItem.putArray("required");
-        stepRequired.add("id").add("tool").add("dependsOn").add("params");
+        stepRequired.add("id").add("dependsOn");
 
         ArrayNode required = root.putArray("required");
         required.add("status").add("message");

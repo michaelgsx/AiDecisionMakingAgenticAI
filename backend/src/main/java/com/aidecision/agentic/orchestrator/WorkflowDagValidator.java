@@ -58,6 +58,18 @@ public class WorkflowDagValidator {
             if (!ids.add(step.id())) {
                 errors.add("Duplicate step id: " + step.id());
             }
+
+            if (step.isGate()) {
+                if (step.expression() == null || step.expression().isBlank()) {
+                    errors.add("Gate " + step.id() + " requires expression");
+                }
+                if ((step.thenSteps() == null || step.thenSteps().isEmpty())
+                        && (step.elseSteps() == null || step.elseSteps().isEmpty())) {
+                    errors.add("Gate " + step.id() + " requires at least one then or else target step");
+                }
+                continue;
+            }
+
             if (step.tool() == null || step.tool().isBlank()) {
                 errors.add("Step " + step.id() + " missing tool name");
                 continue;
@@ -68,7 +80,7 @@ public class WorkflowDagValidator {
             } else if (syncOnly && !"SYNC".equalsIgnoreCase(toolMeta.getExecutionMode())) {
                 errors.add("Sync-only execution cannot run ASYNC tool: " + step.tool());
             }
-            if (hasExecutor != null && !hasExecutor.test(step.tool())) {
+            if (hasExecutor != null && !step.isGate() && !hasExecutor.test(step.tool())) {
                 errors.add("No runtime executor for tool: " + step.tool());
             }
 
@@ -81,6 +93,16 @@ public class WorkflowDagValidator {
                 } else if (!ids.contains(dep) && !containsId(dag.steps(), dep)) {
                     errors.add("Step " + step.id() + " depends on unknown step: " + dep);
                 }
+            }
+        }
+
+        Set<String> allIds = dag.steps().stream()
+                .map(WorkflowDag.WorkflowStepDef::id)
+                .filter(id -> id != null && !id.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
+        for (WorkflowDag.WorkflowStepDef step : dag.steps()) {
+            if (step.isGate()) {
+                validateGateTargets(step, allIds, errors);
             }
         }
 
@@ -153,5 +175,26 @@ public class WorkflowDagValidator {
 
     private static boolean containsId(List<WorkflowDag.WorkflowStepDef> steps, String id) {
         return steps.stream().anyMatch(s -> s.id().equals(id));
+    }
+
+    private static void validateGateTargets(WorkflowDag.WorkflowStepDef gate, Set<String> ids, List<String> errors) {
+        for (String target : gate.thenSteps()) {
+            if (target == null || target.isBlank()) {
+                errors.add("Gate " + gate.id() + " has blank then target");
+            } else if (target.equals(gate.id())) {
+                errors.add("Gate " + gate.id() + " cannot target itself in then");
+            } else if (!ids.contains(target)) {
+                errors.add("Gate " + gate.id() + " then target unknown step: " + target);
+            }
+        }
+        for (String target : gate.elseSteps()) {
+            if (target == null || target.isBlank()) {
+                errors.add("Gate " + gate.id() + " has blank else target");
+            } else if (target.equals(gate.id())) {
+                errors.add("Gate " + gate.id() + " cannot target itself in else");
+            } else if (!ids.contains(target)) {
+                errors.add("Gate " + gate.id() + " else target unknown step: " + target);
+            }
+        }
     }
 }

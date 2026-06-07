@@ -7,8 +7,8 @@
 | **Orchestrator** | Accept questions, plan DAG, persist workflow, poll status, resume failed runs |
 | **Tool registry** | Portal of tools (name, version, schemas, SYNC/ASYNC, type). Built-ins auto-inserted at startup if missing |
 | **Workflow planner** | LLM builds execution DAG from question + tool catalog (see README § *LLM workflow planning*) |
-| **DAG validator** | No cycles (dead loops), known tools, max step count |
-| **Executor** | Runs READY steps when dependencies are COMPLETED |
+| **DAG validator** | No cycles (dead loops), known tools, max step count; validates **gate** steps (`type: gate`, expression, then/else targets) |
+| **Executor** | Runs READY steps when dependencies are COMPLETED or SKIPPED; **gate** steps evaluate conditions and skip untaken branches |
 | **Worker** | Background thread (`@Scheduled`) processes PENDING/RUNNING runs |
 | **Feedback** | Thumbs up/down → `qa_feedback` linked by `run_id` |
 

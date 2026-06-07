@@ -101,6 +101,6 @@ class WorkflowDagValidatorTest {
     }
 
     private static WorkflowDag.WorkflowStepDef step(String id, String tool, List<String> deps) {
-        return new WorkflowDag.WorkflowStepDef(id, tool, deps, Map.of(), null, null);
+        return WorkflowDag.WorkflowStepDef.tool(id, tool, deps, Map.of(), null, null);
     }
 }

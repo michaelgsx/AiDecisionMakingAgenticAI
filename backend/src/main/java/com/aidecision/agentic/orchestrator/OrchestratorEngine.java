@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -192,7 +193,10 @@ public class OrchestratorEngine {
         }
 
         List<OrchestratorStep> steps = stepRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId());
-        if (steps.stream().allMatch(s -> StepStatus.COMPLETED.name().equals(s.getStatus()))) {
+        if (steps.stream().allMatch(s -> {
+            String status = s.getStatus();
+            return StepStatus.COMPLETED.name().equals(status) || StepStatus.SKIPPED.name().equals(status);
+        })) {
             completeRun(run, steps);
         }
     }
@@ -206,10 +210,20 @@ public class OrchestratorEngine {
             OrchestratorStep step = new OrchestratorStep();
             step.setRunId(run.getRunId());
             step.setStepKey(def.id());
-            step.setToolName(def.tool());
+            if (def.isGate()) {
+                step.setToolName(WorkflowDag.GATE_TOOL_NAME);
+                Map<String, Object> gateConfig = new HashMap<>();
+                gateConfig.put("type", WorkflowDag.STEP_TYPE_GATE);
+                gateConfig.put("expression", def.expression());
+                gateConfig.put("then", def.thenSteps());
+                gateConfig.put("else", def.elseSteps());
+                step.setInputJson(mapper.writeValueAsString(gateConfig));
+            } else {
+                step.setToolName(def.tool());
+                step.setInputJson(mapper.writeValueAsString(def.params() == null ? Map.of() : def.params()));
+            }
             step.setStatus(StepStatus.PENDING.name());
             step.setDependsOnJson(mapper.writeValueAsString(def.dependsOn() == null ? List.of() : def.dependsOn()));
-            step.setInputJson(mapper.writeValueAsString(def.params() == null ? Map.of() : def.params()));
             int maxTime = def.maxTimeMs() != null ? def.maxTimeMs() : (int) props.getDefaultStepMaxTimeMs();
             int timeout = def.timeoutMs() != null ? def.timeoutMs() : (int) props.getDefaultStepTimeoutMs();
             step.setMaxTimeMs(maxTime);

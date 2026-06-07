@@ -84,10 +84,10 @@ class CompoundWorkflowExpanderTest {
     }
 
     private static WorkflowDag.WorkflowStepDef nl2sql(String id, String question, List<String> deps) {
-        return new WorkflowDag.WorkflowStepDef(id, "natural_language_to_sql", deps, Map.of("question", question), null, null);
+        return WorkflowDag.WorkflowStepDef.tool(id, "natural_language_to_sql", deps, Map.of("question", question), null, null);
     }
 
     private static WorkflowDag.WorkflowStepDef llmAnswer(String id, List<String> deps) {
-        return new WorkflowDag.WorkflowStepDef(id, "llm_answer", deps, Map.of(), null, null);
+        return WorkflowDag.WorkflowStepDef.tool(id, "llm_answer", deps, Map.of(), null, null);
     }
 }
