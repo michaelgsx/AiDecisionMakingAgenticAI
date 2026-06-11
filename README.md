@@ -6,6 +6,12 @@ Companion UI: **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisi
 
 **🔗 Live demo (UI):** https://yellow-island-0fefe051e.7.azurestaticapps.net/
 
+**🎬 Demo video**
+
+<video controls src="docs/screenshots/demo.mov" width="800">
+  <a href="docs/screenshots/demo.mov">Download demo.mov</a>
+</video>
+
 > **Synthetic data:** Schema catalog text, seed risk rows, and demo evaluations are AI-generated for development only.
 
 ## Orchestrator capabilities
