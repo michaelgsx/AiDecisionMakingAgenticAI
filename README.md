@@ -8,11 +8,9 @@ Companion UI: **[AiDecisionMakingQAFront](https://github.com/michaelgsx/AiDecisi
 
 **🎬 Demo video** — agentic Q&A UI walkthrough (planner → tools → answer + workflow diagram).
 
-GitHub README does not render in-page `<video>` players. Use the hosted player on the live SWA (same origin as the demo app):
+**[▶ Watch on YouTube](https://www.youtube.com/watch?v=AGwshtB56CA)**
 
-**[▶ Play demo video](https://yellow-island-0fefe051e.7.azurestaticapps.net/demo.html)**
-
-[![Demo walkthrough — click to open the video player](docs/screenshots/demo-poster.jpg)](https://yellow-island-0fefe051e.7.azurestaticapps.net/demo.html)
+[![Demo walkthrough — click to play on YouTube](https://img.youtube.com/vi/AGwshtB56CA/hqdefault.jpg)](https://www.youtube.com/watch?v=AGwshtB56CA)
 
 > **Synthetic data:** Schema catalog text, seed risk rows, and demo evaluations are AI-generated for development only.
 
