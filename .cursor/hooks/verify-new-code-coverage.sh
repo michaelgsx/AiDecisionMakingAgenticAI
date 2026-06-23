@@ -5,10 +5,15 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$ROOT"
 
-read -r _ < /dev/null || true
+if [[ -t 0 ]]; then
+  :
+else
+  cat >/dev/null || true
+fi
 
 MAIN_PREFIX="backend/src/main/java/"
 TEST_PREFIX="backend/src/test/java/"
+PKG_PREFIX="com.aidecision.agentic."
 
 collect_changed() {
   {
@@ -21,14 +26,52 @@ collect_changed() {
 to_test_path() {
   local main_file="$1"
   local rel="${main_file#"$MAIN_PREFIX"}"
-  local class_file="$(basename "$rel" .java)"
-  local pkg_dir="$(dirname "$rel")"
+  local class_file
+  class_file="$(basename "$rel" .java)"
+  local pkg_dir
+  pkg_dir="$(dirname "$rel")"
   echo "${TEST_PREFIX}${pkg_dir}/${class_file}Test.java"
 }
 
-to_class_name() {
+to_fqcn() {
   local main_file="$1"
-  basename "$main_file" .java
+  local rel="${main_file#"$MAIN_PREFIX"}"
+  rel="${rel%.java}"
+  echo "${PKG_PREFIX}${rel//\//.}"
+}
+
+emit_followup() {
+  python3 -c 'import json, os; print(json.dumps({"followup_message": os.environ["HOOK_MSG"]}))'
+}
+
+check_jacoco_line_coverage() {
+  local csv="$1"
+  local fqcn="$2"
+  python3 - "$csv" "$fqcn" <<'PY'
+import csv
+import sys
+
+csv_path, fqcn = sys.argv[1], sys.argv[2]
+missed = covered = 0
+found = False
+with open(csv_path, newline="") as fh:
+    for row in csv.DictReader(fh):
+        if row.get("CLASS") == fqcn:
+            missed += int(row.get("LINE_MISSED") or 0)
+            covered += int(row.get("LINE_COVERED") or 0)
+            found = True
+if not found:
+    print("missing")
+    raise SystemExit(2)
+total = missed + covered
+if total == 0:
+    print("ok")
+    raise SystemExit(0)
+if missed > 0:
+    print(f"{covered}/{total}")
+    raise SystemExit(1)
+print("ok")
+PY
 }
 
 failures=()
@@ -40,7 +83,7 @@ while IFS= read -r file; do
   [[ "$file" != ${MAIN_PREFIX}*.java ]] && continue
 
   test_file="$(to_test_path "$file")"
-  class_name="$(to_class_name "$file")"
+  class_name="$(basename "$file" .java")"
 
   if [[ ! -f "$test_file" ]]; then
     missing_tests+=("$file -> $test_file")
@@ -58,30 +101,29 @@ if ((${#test_classes[@]} > 0)); then
   if ! command -v mvn >/dev/null 2>&1; then
     failures+=("mvn not found; run tests manually under backend/")
   else
-  (
-    cd backend
-    tests_arg="$(IFS=,; echo "${test_classes[*]}")"
-    if ! mvn -q test -Dtest="$tests_arg" jacoco:report 2>&1; then
-      failures+=("mvn test failed for: $tests_arg")
-    else
-      while IFS= read -r file; do
-        [[ -z "$file" ]] && continue
-        class_name="$(to_class_name "$file")"
-        fqcn="com.aidecision.agentic.$(echo "${file#"$MAIN_PREFIX"}" | sed 's|/|.|g' | sed 's/.java$//')"
-        csv_line="$(grep ",$fqcn," target/site/jacoco/jacoco.csv 2>/dev/null | head -1 || true)"
-        if [[ -z "$csv_line" ]]; then
-          failures+=("$file: no JaCoCo entry for $fqcn (run mvn test jacoco:report)")
-          continue
+    (
+      cd backend
+      tests_arg="$(IFS=,; echo "${test_classes[*]}")"
+      if ! mvn -q test -Dtest="$tests_arg" >/tmp/agentic-hook-test.log 2>&1; then
+        failures+=("mvn test failed for: $tests_arg")
+      else
+        csv="target/site/jacoco/jacoco.csv"
+        if [[ ! -f "$csv" ]]; then
+          failures+=("JaCoCo report missing at backend/$csv")
+        else
+          while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            fqcn="$(to_fqcn "$file")"
+            result="$(check_jacoco_line_coverage "$csv" "$fqcn" 2>/dev/null || true)"
+            case "$result" in
+              ok) ;;
+              missing) failures+=("$file: no JaCoCo entry for $fqcn") ;;
+              *) failures+=("$file: line coverage $result (need 100%)") ;;
+            esac
+          done < <(collect_changed | grep "^backend/src/main/java/.*\.java$" || true)
         fi
-        missed="$(echo "$csv_line" | cut -d, -f8)"
-        covered="$(echo "$csv_line" | cut -d, -f9)"
-        total=$((missed + covered))
-        if (( total > 0 && missed > 0 )); then
-          failures+=("$file: line coverage $covered/$total (need 100%)")
-        fi
-      done < <(collect_changed | grep "^backend/src/main/java/.*\.java$" || true)
-    fi
-  )
+      fi
+    )
   fi
 fi
 
@@ -91,22 +133,20 @@ fi
 
 msg="New/changed Java classes must have unit tests at 100% line coverage before you stop."
 if ((${#missing_tests[@]} > 0)); then
-  msg+="\n\nMissing test files:"
+  msg+=$'\n\nMissing test files:'
   for m in "${missing_tests[@]}"; do
-    msg+="\n- $m"
+    msg+=$'\n- '"$m"
   done
 fi
 if ((${#failures[@]} > 0)); then
-  msg+="\n\nCoverage/test failures:"
+  msg+=$'\n\nCoverage/test failures:'
   for f in "${failures[@]}"; do
-    msg+="\n- $f"
+    msg+=$'\n- '"$f"
   done
 fi
-msg+="\n\nAdd tests under backend/src/test/java/ (mirror package), then run: cd backend && mvn test -Dtest=<Class>Test jacoco:report"
+msg+=$'\n\nAdd tests under backend/src/test/java/ (mirror package), then run:'
+msg+=$'\n  cd backend && mvn test -Dtest=<Class>Test'
 
-python3 - <<PY
-import json
-print(json.dumps({"followup_message": """$msg"""}))
-PY
-
+export HOOK_MSG="$msg"
+emit_followup
 exit 0
