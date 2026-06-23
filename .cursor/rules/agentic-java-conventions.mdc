@@ -1,0 +1,41 @@
+---
+description: AiDecisionMakingAgenticAI Spring Boot Java conventions
+alwaysApply: true
+---
+
+# AgenticAI Java conventions
+
+## Stack
+
+Spring Boot 3.3 + Java 17 + JPA + Maven. Source: `backend/src/main/java/com/aidecision/agentic/`.
+
+## Package layout
+
+| Package | Responsibility |
+|---------|----------------|
+| `orchestrator/` | Workflow planner, DAG validation, executor, compound expansion |
+| `service/` | Business logic, async chat, run assembly |
+| `tool/` + `tool/impl/` | Registered tools and HTTP/LLM invocations |
+| `controller/` | REST endpoints (thin — delegate to services) |
+| `dto/` | Request/response records for the API |
+| `entity/` + `repository/` | JPA persistence |
+
+## Style
+
+- Prefer package-private or public methods with clear names; `methodName_scenario` in tests.
+- DTOs use validation annotations (`@NotBlank`, `@Valid`) at controller boundaries.
+- Keep controllers thin; orchestration and SQL/LLM work stay in services/tools.
+- No secrets in code — use `backend/.env` (gitignored) and Spring `@ConfigurationProperties`.
+
+## Orchestration rules
+
+- Workflow planner output must pass `WorkflowDagValidator` before execution.
+- Tools are registered in DB (`orchestrator_tool`); executor resolves by `tool_name`.
+- Async runs persist step status for polling; failures must update run state.
+- Do not call live Azure OpenAI or SQL Server in unit tests — use mocks/stubs.
+
+## Tests (required for new behavior)
+
+- Mirror package: `backend/src/test/java/.../<ClassName>Test.java`.
+- JUnit 5 + AssertJ + Mockito; avoid `@SpringBootTest` unless integration is required.
+- Run: `cd backend && mvn -q test -Dtest=<ClassName>Test`.

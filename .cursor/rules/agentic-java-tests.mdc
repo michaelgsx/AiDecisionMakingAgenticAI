@@ -1,0 +1,17 @@
+---
+description: Unit test requirements for Java source changes
+globs: backend/src/main/java/**/*.java
+alwaysApply: false
+---
+
+# Tests for src/main/java changes
+
+When you add or change a class under `backend/src/main/java/com/aidecision/agentic/`:
+
+1. Add or update `backend/src/test/java/.../<ClassName>Test.java` in the **same package**.
+2. Prefer pure unit tests (no Spring context); mock repos, HTTP, and LLM clients.
+3. Name tests `methodName_scenario` (e.g. `evaluate_numericComparison_returnsTrue`).
+4. Run `cd backend && mvn -q test -Dtest=<ClassName>Test`.
+5. Aim for **100% line coverage** on the changed class (verify with JaCoCo report after `mvn test`).
+
+Do not add tests that only assert constants or trivial getters with no behavior.
